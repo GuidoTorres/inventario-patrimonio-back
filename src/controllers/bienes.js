@@ -7,11 +7,34 @@ const { Sequelize } = require("sequelize");
 
 const getBienesSiga = async (req, res) => {
   try {
-    const response = await fetch("http://localhost:3001/api/v1/bienes");
+    // Obtener los parámetros de la consulta
+    const { sede_id, ubicacion_id, dni, sbn, serie } = req.query;
+
+    // Construir la URL con los parámetros recibidos
+    let url = "http://10.30.1.42:8084/api/v1/bienes?";
+    const queryParams = new URLSearchParams();
+
+    if (sede_id) queryParams.append("sede_id", sede_id);
+    if (ubicacion_id) queryParams.append("ubicacion_id", ubicacion_id);
+    if (dni) queryParams.append("dni", dni);
+    if (sbn) queryParams.append("sbn", sbn);
+    if (serie) queryParams.append("serie", serie);
+
+    // Concatenar los parámetros a la URL
+    url += queryParams.toString();
+
+    // Hacer la solicitud a la API externa con los parámetros
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error("Error fetching data from external API");
+    }
+
     const externalData = await response.json();
 
-    await models.bienes.bulkCreate(externalData.data);
+    // Guardar los datos en tu base de datos local
+    await models.bienes.bulkCreate(externalData.data, { updateOnDuplicate: true });
 
+    // Devolver la respuesta
     return res.json(externalData);
   } catch (error) {
     console.log(error);
@@ -20,6 +43,7 @@ const getBienesSiga = async (req, res) => {
       .json({ message: "Error fetching data", error: error.message });
   }
 };
+
 
 const getBienes = async (req, res) => {
   try {
@@ -192,7 +216,9 @@ const bienesPorTrabajador = async (req, res) => {
         dni: dniTrabajador,
         ubicacion_id: ubicacion.dataValues.id,
       },
-      attributes: ["id", "descripcion", "estado", "dni"], // Atributos que necesitas devolver
+      attributes: ["id", "descripcion", "estado", "dni", "sbn",],
+
+      include: [{ model: models.ubicaciones, attributes: ["tipo_ubicac", "ubicac_fisica"] }]
     });
 
     // Si no se encuentran bienes, devolver una respuesta adecuada
