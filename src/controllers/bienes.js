@@ -204,42 +204,76 @@ const etiquetasBienes = async (req, res) => {
 
 const bienesPorTrabajador = async (req, res) => {
   try {
-    const cod = req.query.cod; // Código de la ubicación
-    const dniTrabajador = req.query.dni; // DNI del trabajador seleccionado
-    const ubicacion = await models.ubicaciones.findOne({
-      where: Sequelize.literal(`CONCAT(tipo_ubicac, ubicac_fisica) = '${cod}'`),
-      attributes: ["id"],
-    });
-    // Buscar los bienes que coinciden con la ubicación y el trabajador seleccionado
-    const bienes = await models.bienes.findAll({
-      where: {
-        dni: dniTrabajador,
-        ubicacion_id: ubicacion.dataValues.id,
-      },
-      attributes: ["id", "descripcion", "estado", "dni", "sbn",],
+    const cod = req.query.cod; // Código de la ubicación (opcional)
+    const dniTrabajador = req.query.dni; // DNI del trabajador seleccionado (opcional)
+    const sbn = req.query.sbn ? req.query.sbn.trim() : null; // SBN del bien (opcional)
+    console.log("sbn prueba");
 
-      include: [{ model: models.ubicaciones, attributes: ["tipo_ubicac", "ubicac_fisica"] }]
+    console.log(sbn);
+
+    // Crear el objeto de condiciones de búsqueda de manera dinámica
+    const whereConditions = {};
+
+    // Si se proporciona el cod, buscar la ubicación
+    if (cod) {
+      const ubicacion = await models.ubicaciones.findOne({
+        where: Sequelize.literal(`CONCAT(tipo_ubicac, ubicac_fisica) = '${cod}'`),
+        attributes: ["id"],
+      });
+
+      if (!ubicacion) {
+        return res.status(404).json({
+          message: "Ubicación no encontrada.",
+        });
+      }
+
+      // Agregar el id de la ubicación a las condiciones de búsqueda
+      whereConditions.ubicacion_id = ubicacion.dataValues.id;
+    }
+
+    // Si se proporciona el DNI del trabajador, agregarlo a las condiciones de búsqueda
+    if (dniTrabajador) {
+      whereConditions.dni = dniTrabajador;
+    }
+
+    // Si se proporciona el SBN, agregarlo a las condiciones de búsqueda
+    if (sbn) {
+      whereConditions.sbn = sbn;
+    }
+
+    // Si no se proporciona ninguna condición, devolver un error
+    if (!cod && !dniTrabajador && !sbn) {
+      return res.status(400).json({
+        message: "Debe proporcionar al menos un parámetro de búsqueda: cod, dni o sbn.",
+      });
+    }
+    console.log(whereConditions);
+    
+    // Buscar los bienes que coinciden con las condiciones proporcionadas
+    const bienes = await models.bienes.findAll({
+      where: whereConditions,
+      attributes: ["id", "descripcion", "estado", "dni", "sbn"],
+      include: [
+        { model: models.ubicaciones, attributes: ["tipo_ubicac", "ubicac_fisica"] },
+      ],
     });
 
     // Si no se encuentran bienes, devolver una respuesta adecuada
     if (bienes.length === 0) {
-      return res
-        .status(404)
-        .json({
-          message:
-            "No se encontraron bienes para este trabajador en la ubicación especificada.",
-        });
+      return res.status(404).json({
+        message: "No se encontraron bienes con los filtros especificados.",
+      });
     }
 
     // Devolver la lista de bienes
     return res.json(bienes);
   } catch (error) {
     console.log(error);
-    res
-      .status(500)
-      .json({ message: "Error fetching data", error: error.message });
+    res.status(500).json({ message: "Error fetching data", error: error.message });
   }
 };
+
+
 
 const getConsultaBienes = async (req, res) => {
   try {
