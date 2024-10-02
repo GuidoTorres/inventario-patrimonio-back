@@ -252,7 +252,7 @@ const bienesPorTrabajador = async (req, res) => {
     // Buscar los bienes que coinciden con las condiciones proporcionadas
     const bienes = await models.bienes.findAll({
       where: whereConditions,
-      attributes: ["id", "descripcion", "estado", "dni", "sbn"],
+      attributes: ["id", "descripcion", "estado", "dni", "sbn", "marca", "modelo", "color", "serie", "estado"],
       include: [
         { model: models.ubicaciones, attributes: ["tipo_ubicac", "ubicac_fisica"] },
       ],
