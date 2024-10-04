@@ -43,8 +43,6 @@ const getBienesSiga = async (req, res) => {
       .json({ message: "Error fetching data", error: error.message });
   }
 };
-
-
 const getBienes = async (req, res) => {
   try {
     const bien = await models.bienes.findOne({
@@ -103,7 +101,6 @@ const getBienes = async (req, res) => {
       .json({ message: "Error fetching data", error: error.message });
   }
 };
-
 const getBienesInventariados = async (req, res) => {
   try {
     const bien = await models.bienes.findAll({
@@ -136,7 +133,6 @@ const getBienImagen = async (req, res) => {
     res.status(404).send("Imagen no encontrada");
   }
 };
-
 const postBienes = async (req, res) => {
   try {
     await models.bienes.update(req.body, {
@@ -150,8 +146,7 @@ const postBienes = async (req, res) => {
       .status(500)
       .json({ message: "Error fetching data", error: error.message });
   }
-};
-
+}
 const etiquetasBienes = async (req, res) => {
   try {
     const cod = req.query.cod;
@@ -201,15 +196,11 @@ const etiquetasBienes = async (req, res) => {
       .json({ message: "Error fetching data", error: error.message });
   }
 };
-
 const bienesPorTrabajador = async (req, res) => {
   try {
     const cod = req.query.cod; // Código de la ubicación (opcional)
     const dniTrabajador = req.query.dni; // DNI del trabajador seleccionado (opcional)
     const sbn = req.query.sbn ? req.query.sbn.trim() : null; // SBN del bien (opcional)
-    console.log("sbn prueba");
-
-    console.log(sbn);
 
     // Crear el objeto de condiciones de búsqueda de manera dinámica
     const whereConditions = {};
@@ -272,9 +263,6 @@ const bienesPorTrabajador = async (req, res) => {
     res.status(500).json({ message: "Error fetching data", error: error.message });
   }
 };
-
-
-
 const getConsultaBienes = async (req, res) => {
   try {
     // Obtener los parámetros de búsqueda de la solicitud
@@ -308,6 +296,24 @@ const getConsultaBienes = async (req, res) => {
   }
 };
 
+const getSigaToDB = async (req, res) => {
+  try {
+    // Obtener los parámetros de búsqueda de la solicitud
+    let url = "http://localhost:3001/api/v1/bienes/siga";
+
+    const response = await fetch(url);
+    const externalData = await response.json();
+
+    // Devolver los bienes filtrados
+    return res.json({ data: externalData });
+  } catch (error) {
+    console.log(error);
+    res
+      .status(500)
+      .json({ message: "Error fetching data", error: error.message });
+  }
+};
+
 module.exports = {
   getBienesSiga,
   getBienes,
@@ -317,4 +323,5 @@ module.exports = {
   etiquetasBienes,
   bienesPorTrabajador,
   getConsultaBienes,
+  getSigaToDB
 };

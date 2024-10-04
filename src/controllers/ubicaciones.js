@@ -2,7 +2,7 @@ const { models } = require("./../../config/config");
 const getUbicaciones = async (req, res) => {
     try {
         const ubicaciones = await models.ubicaciones.findAll({
-            attributes: ["id", "nombre", "dependencia_id", "ubicac_fisica"]
+            attributes: ["id", "nombre", "dependencia_id", "tipo_ubicac", "ubicac_fisica"]
 
         });
 
