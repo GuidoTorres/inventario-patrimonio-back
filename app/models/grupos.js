@@ -1,6 +1,6 @@
 module.exports = (sequelize, DataTypes) => {
-  const roles = sequelize.define(
-    "roles",
+  const grupos = sequelize.define(
+    "grupos",
     {
       id: {
         allowNull: false,
@@ -9,9 +9,10 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.INTEGER,
       },
       nombre: DataTypes.STRING,
+      anio: DataTypes.INTEGER,
     },
-    { timestamps: false, tableName: "roles", freezeTableName: true }
+    { timestamps: false, tableName: "grupos", freezeTableName: true }
   );
 
-  return roles;
+  return grupos;
 };

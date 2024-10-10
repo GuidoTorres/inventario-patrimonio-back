@@ -12,12 +12,12 @@ module.exports = (sequelize, DataTypes) =>{
         nombre: DataTypes.STRING,
         createdAt : DataTypes.DATE,
         updatedAt: DataTypes.DATE,
+        tipo_ubicac:DataTypes.STRING,
+        ubicac_fisica: DataTypes.STRING,
+        sede_id: DataTypes.INTEGER,
+        centro_costo: DataTypes.STRING,
 
     }, {timestamps: true, tableName: "dependencias", freezeTableName: true})
-    dependencias.associate = function(models) {
-        // equipos.belongsTo(models.sedes, { foreignKey: "sede_id" });
-        // equipos.belongsTo(models.ubicaciones, {foreignKey: "ubicacion_id"})
-      };
 
     return dependencias;
 

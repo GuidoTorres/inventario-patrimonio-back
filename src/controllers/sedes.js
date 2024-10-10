@@ -1,6 +1,8 @@
-const { models } = require("./../../config/config");
+const {getDatabaseConnection} = require("./../../config/config");
 const getSedes = async (req, res) => {
     try {
+        const {models} = await getDatabaseConnection(); // Obtener la conexión adecuada (remota o local)
+
         const sedes = await models.sedes.findAll({
             attributes:["id", "nombre"]
         });
@@ -16,6 +18,8 @@ const getSedes = async (req, res) => {
 
 const postSedes = async (req, res) => {
     try {
+    const {models} = await getDatabaseConnection(); 
+
         await models.sedes.create(req.body);
 
         return res.json({ msg: "Sede creada con éxito!" });
@@ -29,6 +33,8 @@ const postSedes = async (req, res) => {
 
 const updateSedes = async (req, res) => {
     try {
+    const {models} = await getDatabaseConnection(); 
+
         await models.sedes.update(req.body, {
             where: { id: id }
         });
@@ -44,6 +50,8 @@ const updateSedes = async (req, res) => {
 
 const deleteSedes = async (req, res) => {
     try {
+    const {models} = await getDatabaseConnection(); 
+
         await models.sedes.destroy({
             where: { id: id }
         });

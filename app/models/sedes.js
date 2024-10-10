@@ -14,10 +14,6 @@ module.exports = (sequelize, DataTypes) =>{
         updatedAt: DataTypes.DATE,
 
     }, {timestamps: true, tableName: "sedes", freezeTableName: true})
-    sedes.associate = function(models) {
-        // equipos.hasMany(models.ubicaciones, { foreignKey: "ubicacion_id" });
-        // equipos.hasMany(models.dependencias, {foreignKey: "dependencia_id"})
-      };
 
     return sedes;
 

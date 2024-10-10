@@ -1,9 +1,9 @@
 const fetch = (...args) =>
   import("node-fetch").then(({ default: fetch }) => fetch(...args));
-const { models } = require("./../../config/config");
 const fs = require("fs");
 const path = require("path");
 const { Sequelize } = require("sequelize");
+const { getDatabaseConnection } = require("./../../config/config");
 
 const getBienesSiga = async (req, res) => {
   try {
@@ -32,7 +32,9 @@ const getBienesSiga = async (req, res) => {
     const externalData = await response.json();
 
     // Guardar los datos en tu base de datos local
-    await models.bienes.bulkCreate(externalData.data, { updateOnDuplicate: true });
+    await models.bienes.bulkCreate(externalData.data, {
+      updateOnDuplicate: true,
+    });
 
     // Devolver la respuesta
     return res.json(externalData);
@@ -45,6 +47,8 @@ const getBienesSiga = async (req, res) => {
 };
 const getBienes = async (req, res) => {
   try {
+    const { models } = await getDatabaseConnection();
+
     const bien = await models.bienes.findOne({
       attributes: { exclude: ["trabajador_id"] },
       where: {
@@ -93,7 +97,7 @@ const getBienes = async (req, res) => {
     };
 
     // Devolver la información del bien con la URL de la imagen
-    return res.json({ info });
+    return res.status(200).json({ info });
   } catch (error) {
     console.log(error);
     res
@@ -103,13 +107,15 @@ const getBienes = async (req, res) => {
 };
 const getBienesInventariados = async (req, res) => {
   try {
+    const { models } = await getDatabaseConnection();
+
     const bien = await models.bienes.findAll({
       attributes: { exclude: ["trabajador_id"] },
-
       where: {
         inventariado: true,
       },
     });
+
     // Devolver la información del bien con la URL de la imagen
     return res.json({ bien });
   } catch (error) {
@@ -119,6 +125,42 @@ const getBienesInventariados = async (req, res) => {
       .json({ message: "Error fetching data", error: error.message });
   }
 };
+const getBienesPorInventariador = async (req, res) => {
+  try {
+    const { models } = await getDatabaseConnection();
+
+    const bienesPorInventariador = await models.bienes.findAll({
+      attributes: [
+        "usuario_id",
+        [Sequelize.fn("COUNT", Sequelize.col("bienes.id")), "total_bienes"],
+        [Sequelize.col("usuario.id"), "usuario.id"],
+        [Sequelize.col("usuario.nombre_usuario"), "usuario.nombre_usuario"],
+      ],
+      include: [
+        {
+          model: models.usuarios,
+          as: "usuario", // Asegúrate de que el alias sea correcto
+          attributes: ["nombre_usuario"], // No traer todos los atributos, solo los especificados
+        },
+      ],
+      where: {
+        inventariado: true, // Solo bienes inventariados
+      },
+      group: ["bienes.usuario_id", "usuario.id", "usuario.nombre_usuario"], // Asegúrate de agrupar correctamente
+    });
+
+    return res.json({ data: bienesPorInventariador });
+  } catch (error) {
+    console.log(error);
+    res
+      .status(500)
+      .json({
+        message: "Error al obtener bienes por inventariador",
+        error: error.message,
+      });
+  }
+};
+
 const getBienImagen = async (req, res) => {
   const { sbn, filename } = req.params;
 
@@ -135,10 +177,24 @@ const getBienImagen = async (req, res) => {
 };
 const postBienes = async (req, res) => {
   try {
+    const { models } = await getDatabaseConnection();
     await models.bienes.update(req.body, {
       where: { sbn: req.body.sbn },
     });
+    const io = req.app.locals.io;
 
+    // Obtener el número actualizado de bienes inventariados
+    const count = await models.bienes.count({
+      where: {
+        inventariado: true,
+      },
+    });
+
+    // Emitir el bien actualizado y el nuevo conteo de bienes a través de Socket.IO
+    io.emit("bien-actualizado", {
+      bien: req.body,
+      count: count, // Enviar el nuevo conteo
+    });
     return res.json({ msg: "Bien actualizado con éxito!" });
   } catch (error) {
     console.log(error);
@@ -146,110 +202,136 @@ const postBienes = async (req, res) => {
       .status(500)
       .json({ message: "Error fetching data", error: error.message });
   }
-}
-const etiquetasBienes = async (req, res) => {
+};
+const sedesPorTrabajador = async (req, res) => {
   try {
-    const cod = req.query.cod;
+    const { models } = await getDatabaseConnection();
+    const dniTrabajador = req.query.dni; // DNI del trabajador seleccionado
 
-    // Buscar los bienes que están en la ubicación concatenada
+    // Verificar si se proporcionó un DNI
+    if (!dniTrabajador) {
+      return res.status(400).json({
+        message: "Debe proporcionar el DNI del trabajador.",
+      });
+    }
+
+    // Buscar las ubicaciones, dependencias y sedes relacionadas con los bienes del trabajador
     const bienes = await models.bienes.findAll({
-      attributes: [], // No necesitamos atributos adicionales de esta tabla
+      where: { dni: dniTrabajador, inventariado: true },
+      attributes: [], // No necesitamos los atributos de la tabla de bienes
       include: [
         {
-          model: models.ubicaciones, // Incluir la tabla de ubicaciones
-          where: Sequelize.literal(
-            `CONCAT(tipo_ubicac, ubicac_fisica) = '${cod}'`
-          ),
+          model: models.sedes,
+        },
+        {
+          model: models.dependencias,
+        },
+        {
+          model: models.ubicaciones,
         },
       ],
-      attributes: ["dni"], // Solo necesitamos el campo dni de la tabla bienes
+
     });
-
-    // Extraer solo los DNIs únicos
-    const dniList = bienes
-      .map((bien) => bien.dni)
-      .filter((value, index, self) => self.indexOf(value) === index);
-
-    // Si no se encuentran DNIs, devolver una respuesta adecuada
-    if (dniList.length === 0) {
-      return res
-        .status(404)
-        .json({
-          message: "No se encontraron bienes en la ubicación especificada.",
-        });
+    
+    // Si no se encuentran bienes para el trabajador, devolver un mensaje
+    if (bienes.length === 0) {
+      return res.status(404).json({
+        message: "No se encontraron ubicaciones para el trabajador.",
+      });
     }
 
-    // Paso 2: Buscar los trabajadores que coincidan con los DNIs obtenidos
-    const trabajadores = await models.trabajadores.findAll({
-      where: {
-        dni: dniList, // Buscar en la tabla trabajadores usando los DNIs obtenidos
-      },
-      attributes: ["id", "dni", "nombre"], // Atributos que quieres devolver
+    // Formatear los datos para devolverlos en una estructura clara
+    const response = {
+      sedes: [],
+      dependencias: [],
+      ubicaciones: [],
+    };
+
+    bienes.forEach((bien) => {
+      console.log(bien.dependencia);
+      if (!response.sedes.some((sede) => sede?.id === bien?.sede?.id)) {
+        response.sedes.push(bien.sede);
+      }
+      if (!response.dependencias.some((dep) => dep?.id === bien?.dependencia?.id)) {
+        response.dependencias.push(bien.dependencia);
+      }
+      if (!response.ubicaciones.some((ubi) => ubi?.id === bien?.ubicacione?.id)) {
+        response.ubicaciones.push(bien.ubicacion);
+      }
     });
 
-    // Devolver la lista de trabajadores
-    return res.json(trabajadores);
+    // Devolver las sedes, dependencias y ubicaciones
+    return res.json(bienes);
   } catch (error) {
     console.log(error);
-    res
-      .status(500)
-      .json({ message: "Error fetching data", error: error.message });
+    res.status(500).json({ message: "Error fetching data", error: error.message });
   }
 };
+
 const bienesPorTrabajador = async (req, res) => {
   try {
-    const cod = req.query.cod; // Código de la ubicación (opcional)
-    const dniTrabajador = req.query.dni; // DNI del trabajador seleccionado (opcional)
-    const sbn = req.query.sbn ? req.query.sbn.trim() : null; // SBN del bien (opcional)
+    const { models } = await getDatabaseConnection();
+    
+    const dniTrabajador = req.query.dni; // DNI del trabajador seleccionado
+    const sedeId = req.query.sedeId; // Sede seleccionada
+    const dependenciaId = req.query.dependenciaId; // Dependencia seleccionada
+    const ubicacionId = req.query.ubicacionId; // Ubicación seleccionada
 
-    // Crear el objeto de condiciones de búsqueda de manera dinámica
+    // Crear el objeto de condiciones de búsqueda dinámicamente
     const whereConditions = {};
 
-    // Si se proporciona el cod, buscar la ubicación
-    if (cod) {
-      const ubicacion = await models.ubicaciones.findOne({
-        where: Sequelize.literal(`CONCAT(tipo_ubicac, ubicac_fisica) = '${cod}'`),
-        attributes: ["id"],
-      });
-
-      if (!ubicacion) {
-        return res.status(404).json({
-          message: "Ubicación no encontrada.",
-        });
-      }
-
-      // Agregar el id de la ubicación a las condiciones de búsqueda
-      whereConditions.ubicacion_id = ubicacion.dataValues.id;
-    }
-
-    // Si se proporciona el DNI del trabajador, agregarlo a las condiciones de búsqueda
+    // Agregar las condiciones en base a las selecciones del usuario
     if (dniTrabajador) {
       whereConditions.dni = dniTrabajador;
     }
-
-    // Si se proporciona el SBN, agregarlo a las condiciones de búsqueda
-    if (sbn) {
-      whereConditions.sbn = sbn;
+    if (sedeId) {
+      whereConditions.sede_id = sedeId;
+    }
+    if (dependenciaId) {
+      whereConditions.dependencia_id = dependenciaId;
+    }
+    if (ubicacionId) {
+      whereConditions.ubicacion_id = ubicacionId;
     }
 
-    // Si no se proporciona ninguna condición, devolver un error
-    if (!cod && !dniTrabajador && !sbn) {
+    // Verificar si hay al menos una condición
+    if (Object.keys(whereConditions).length === 0) {
       return res.status(400).json({
-        message: "Debe proporcionar al menos un parámetro de búsqueda: cod, dni o sbn.",
+        message: "Debe proporcionar al menos un filtro para buscar bienes.",
       });
     }
-    console.log(whereConditions);
-    
+
     // Buscar los bienes que coinciden con las condiciones proporcionadas
     const bienes = await models.bienes.findAll({
       where: whereConditions,
-      attributes: ["id", "descripcion", "estado", "dni", "sbn", "marca", "modelo", "color", "serie", "estado"],
+      attributes: [
+        "id",
+        "descripcion",
+        "estado",
+        "dni",
+        "sbn",
+        "marca",
+        "modelo",
+        "color",
+        "serie",
+      ],
       include: [
-        { model: models.ubicaciones, attributes: ["tipo_ubicac", "ubicac_fisica"] },
+        {
+          model: models.ubicaciones,
+          attributes: ["tipo_ubicac", "ubicac_fisica"],
+        },
+        {
+          model: models.sedes,
+          attributes: ["nombre"],
+        },
+        {
+          model: models.dependencias,
+          attributes: ["nombre"],
+        },
       ],
     });
 
-    // Si no se encuentran bienes, devolver una respuesta adecuada
+    // Si no se encuentran bienes, devolver un mensaje
     if (bienes.length === 0) {
       return res.status(404).json({
         message: "No se encontraron bienes con los filtros especificados.",
@@ -263,8 +345,11 @@ const bienesPorTrabajador = async (req, res) => {
     res.status(500).json({ message: "Error fetching data", error: error.message });
   }
 };
+
 const getConsultaBienes = async (req, res) => {
   try {
+    const { models } = await getDatabaseConnection();
+
     // Obtener los parámetros de búsqueda de la solicitud
     const { sede_id, ubicacion_id, dni, sbn, serie } = req.query;
 
@@ -298,14 +383,44 @@ const getConsultaBienes = async (req, res) => {
 
 const getSigaToDB = async (req, res) => {
   try {
-    // Obtener los parámetros de búsqueda de la solicitud
-    let url = "http://localhost:3001/api/v1/bienes/siga";
+    const { models } = await getDatabaseConnection(); // Asegúrate de tener la conexión configurada
 
+    // Obtener los valores de las tablas 'dependencias' y 'ubicaciones'
+    const dependencias = await models.dependencias.findAll();
+    const ubicaciones = await models.ubicaciones.findAll();
+
+    // Hacer fetch a la API externa
+    let url = "http://localhost:3001/api/v1/bienes/prueba";
     const response = await fetch(url);
     const externalData = await response.json();
 
+    // Mapear los datos y buscar los IDs correspondientes
+    const format = externalData?.data?.map(item => {
+      // Buscar los IDs en las tablas de dependencias y ubicaciones
+      const dependencia = dependencias.find(dep => dep.centro_costo === item.CENTRO_COSTO);
+      const ubicacion = ubicaciones.find(ubi => ubi.nombre === item.UBICAC_FISICA);
+
+      return {
+        secuencia: item.SECUENCIA,
+        sbn: item.CODIGO_ACTIVO,
+        descripcion: item.DESCRIPCION,
+        marca: item.MARCA,
+        modelo: item.MODELO,
+        serie: item.NRO_SERIE,
+        estado: item.ESTADO,
+        sede_id: item.SEDE,
+        ubicacion_id: ubicacion ? ubicacion.id : null, // Asignar el ID de la ubicación
+        dependencia_id: dependencia ? dependencia.id : null, // Asignar el ID de la dependencia
+        dni: item.DOCUM_IDENT,
+        estado_patrimonial: item.ESTADO_CONSERV,
+        detalles: item.CARACTERISTICAS
+      };
+    });
+
+    await models.bienes.bulkCreate(format)
+
     // Devolver los bienes filtrados
-    return res.json({ data: externalData });
+    return res.json({ data: format });
   } catch (error) {
     console.log(error);
     res
@@ -314,14 +429,16 @@ const getSigaToDB = async (req, res) => {
   }
 };
 
+
 module.exports = {
   getBienesSiga,
   getBienes,
   postBienes,
   getBienImagen,
   getBienesInventariados,
-  etiquetasBienes,
   bienesPorTrabajador,
   getConsultaBienes,
-  getSigaToDB
+  getSigaToDB,
+  getBienesPorInventariador,
+  sedesPorTrabajador
 };
