@@ -10,7 +10,7 @@ const getMarcas = async (req, res) => {
     let url = "http://10.30.1.43:8085/api/v1/marcas";
     const response = await fetch(url);
     const externalData = await response.json();
-
+//prueba
     return res.json(externalData );
   } catch (error) {
     console.log(error);
