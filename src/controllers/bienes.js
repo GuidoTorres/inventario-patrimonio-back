@@ -79,7 +79,7 @@ const getBienes = async (req, res) => {
     // Caso 2: El bien existe pero ya fue inventariado
     if (bien.inventariado) {
       return res.status(403).json({
-        msg: `El bien ya ha sido inventariado por el usuario ${bien?.usuario?.nombre_usuario}.`,
+        msg: `El bien ya ha sido inventariado.`,
       });
     }
 
