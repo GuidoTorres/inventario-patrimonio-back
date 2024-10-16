@@ -68,6 +68,7 @@ const getBienes = async (req, res) => {
       include:[{model:models.usuarios, attributes:["nombre_usuario"]}]
     });
 
+
     let imageUrl = "";
     // Caso 1: El bien no existe
     if (!bien) {
@@ -85,16 +86,16 @@ const getBienes = async (req, res) => {
 
     // Ruta de la carpeta en el servidor de archivos remoto
     const carpetaRuta = `\\\\10.30.1.22\\patrimonio\\Docpat\\1137\\2024\\Margesi\\${bien?.sbn}`;
-
     // Verificar si la carpeta existe
     if (fs.existsSync(carpetaRuta)) {
       const archivos = fs.readdirSync(carpetaRuta);
-
+      console.log(archivos);
       // Buscar cualquier archivo de imagen (por ejemplo, .jpg o .png)
       const archivoImagen = archivos.find(
-        (file) => file.endsWith(".jpg") || file.endsWith(".png")
+        (file) => file.endsWith(".jpg") || file.endsWith(".jpeg") || file.endsWith(".png")
       );
 
+      console.log(archivoImagen);
       // Si se encuentra un archivo de imagen, construir la URL para acceder a la imagen
       if (archivoImagen) {
         imageUrl = `http://localhost:3006/api/v1/bienes/imagenes/${bien?.sbn}/${archivoImagen}`;
