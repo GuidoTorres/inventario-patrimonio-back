@@ -26,7 +26,7 @@ const getAllTrabajadores = async (req, res) => {
     const { models } = await getDatabaseConnection();
 
     const Trabajador = await models.trabajadores.findAll({
-      attributes: ["nombre", "dni"],
+      attributes: ["nombre", "dni", "id"],
       where: { dni: { [Op.not]: null } },
       order: [['nombre', 'ASC']],
     });

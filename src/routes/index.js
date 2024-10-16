@@ -10,6 +10,9 @@ const inventariadorRouter = require("./inventariadores");
 const UsuarioRouter = require("./usuarios");
 const RolRouter = require("./roles");
 const AuthRouter = require("./auth");
+const MarcasRouter = require("./marcas");
+const ColoresRouter = require("./colores");
+const EstadisticasRouter = require("./estadisticas");
 
 function routerApi(app) {
   const router = express.Router();
@@ -24,6 +27,10 @@ function routerApi(app) {
   router.use("/usuarios", UsuarioRouter);
   router.use("/roles", RolRouter);
   router.use("/auth", AuthRouter);
+  router.use("/marcas", MarcasRouter);
+  router.use("/colores", ColoresRouter);
+  router.use("/estadisticas", EstadisticasRouter);
+
 }
 
 module.exports = routerApi;

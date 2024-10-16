@@ -20,7 +20,7 @@ module.exports = (sequelize, DataTypes) => {
       ubicacion_id: DataTypes.INTEGER,
       dependencia_id: DataTypes.INTEGER,
       dni: DataTypes.STRING,
-      estado_patrimonial: DataTypes.BOOLEAN,
+      estado_patrimonial: DataTypes.STRING,
       fecha_registro: DataTypes.STRING,
       inventariado: DataTypes.BOOLEAN,
       createdAt: DataTypes.DATE,

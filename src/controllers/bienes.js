@@ -2,8 +2,19 @@ const fetch = (...args) =>
   import("node-fetch").then(({ default: fetch }) => fetch(...args));
 const fs = require("fs");
 const path = require("path");
-const { Sequelize } = require("sequelize");
+const { Sequelize, Op } = require("sequelize");
 const { getDatabaseConnection } = require("./../../config/config");
+const cron = require("node-cron");
+
+// cron.schedule('* * * * *', async () => {
+//   console.log('Sincronizando bienes...');
+//   try {
+//     await getBienesSiga(); // Llama a tu función de sincronización
+//     console.log('Sincronización completa.');
+//   } catch (error) {
+//     console.error('Error durante la sincronización:', error);
+//   }
+// });
 
 const getBienesSiga = async (req, res) => {
   try {
@@ -54,10 +65,10 @@ const getBienes = async (req, res) => {
       where: {
         sbn: req.query.sbn,
       },
+      include:[{model:models.usuarios, attributes:["nombre_usuario"]}]
     });
 
     let imageUrl = "";
-
     // Caso 1: El bien no existe
     if (!bien) {
       return res.status(404).json({
@@ -68,7 +79,7 @@ const getBienes = async (req, res) => {
     // Caso 2: El bien existe pero ya fue inventariado
     if (bien.inventariado) {
       return res.status(403).json({
-        msg: "El bien ya ha sido inventariado.",
+        msg: `El bien ya ha sido inventariado por el usuario ${bien?.usuario?.nombre_usuario}.`,
       });
     }
 
@@ -114,6 +125,39 @@ const getBienesInventariados = async (req, res) => {
       where: {
         inventariado: true,
       },
+      include: [
+        { model: models.sedes },
+        { model: models.dependencias },
+        { model: models.ubicaciones },
+        { model: models.trabajadores },
+      ],
+    });
+
+    // Devolver la información del bien con la URL de la imagen
+    return res.json({ bien });
+  } catch (error) {
+    console.log(error);
+    res
+      .status(500)
+      .json({ message: "Error fetching data", error: error.message });
+  }
+};
+
+const getBienesFaltantes = async (req, res) => {
+  try {
+    const { models } = await getDatabaseConnection();
+
+    const bien = await models.bienes.findAll({
+      attributes: { exclude: ["trabajador_id"] },
+      where: {
+        inventariado: { [Op.not]: true },
+      },
+      include: [
+        { model: models.sedes },
+        { model: models.dependencias },
+        { model: models.ubicaciones },
+        { model: models.trabajadores },
+      ],
     });
 
     // Devolver la información del bien con la URL de la imagen
@@ -152,12 +196,10 @@ const getBienesPorInventariador = async (req, res) => {
     return res.json({ data: bienesPorInventariador });
   } catch (error) {
     console.log(error);
-    res
-      .status(500)
-      .json({
-        message: "Error al obtener bienes por inventariador",
-        error: error.message,
-      });
+    res.status(500).json({
+      message: "Error al obtener bienes por inventariador",
+      error: error.message,
+    });
   }
 };
 
@@ -222,17 +264,31 @@ const sedesPorTrabajador = async (req, res) => {
       include: [
         {
           model: models.sedes,
+          attributes: ["id", "nombre"], // Solo devuelve los campos necesarios
         },
         {
           model: models.dependencias,
+          attributes: [
+            "id",
+            "nombre",
+            "tipo_ubicac",
+            "ubicac_fisica",
+            "sede_id",
+          ],
         },
         {
           model: models.ubicaciones,
+          attributes: [
+            "id",
+            "nombre",
+            "tipo_ubicac",
+            "ubicac_fisica",
+            "dependencia_id",
+          ],
         },
       ],
-
     });
-    
+
     // Si no se encuentran bienes para el trabajador, devolver un mensaje
     if (bienes.length === 0) {
       return res.status(404).json({
@@ -240,38 +296,54 @@ const sedesPorTrabajador = async (req, res) => {
       });
     }
 
-    // Formatear los datos para devolverlos en una estructura clara
-    const response = {
-      sedes: [],
-      dependencias: [],
-      ubicaciones: [],
-    };
+    // Estructuras de sets para evitar duplicados en sedes, dependencias y ubicaciones
+    const sedesSet = new Set();
+    const dependenciasSet = new Set();
+    const ubicacionesSet = new Set();
+
+    // Arrays para agrupar las sedes, dependencias y ubicaciones
+    const sedes = [];
+    const dependencias = [];
+    const ubicaciones = [];
 
     bienes.forEach((bien) => {
-      console.log(bien.dependencia);
-      if (!response.sedes.some((sede) => sede?.id === bien?.sede?.id)) {
-        response.sedes.push(bien.sede);
+      // Añadir las sedes si no se repiten
+      if (bien.sede && !sedesSet.has(bien.sede.id)) {
+        sedes.push(bien.sede);
+        sedesSet.add(bien.sede.id); // Agregar al set para evitar duplicados
       }
-      if (!response.dependencias.some((dep) => dep?.id === bien?.dependencia?.id)) {
-        response.dependencias.push(bien.dependencia);
+
+      // Añadir las dependencias si no se repiten
+      if (bien.dependencia && !dependenciasSet.has(bien.dependencia.id)) {
+        dependencias.push(bien.dependencia);
+        dependenciasSet.add(bien.dependencia.id); // Agregar al set para evitar duplicados
       }
-      if (!response.ubicaciones.some((ubi) => ubi?.id === bien?.ubicacione?.id)) {
-        response.ubicaciones.push(bien.ubicacion);
+
+      // Añadir las ubicaciones si no se repiten
+      if (bien.ubicacione && !ubicacionesSet.has(bien.ubicacione.id)) {
+        ubicaciones.push(bien.ubicacione);
+        ubicacionesSet.add(bien.ubicacione.id); // Agregar al set para evitar duplicados
       }
     });
 
-    // Devolver las sedes, dependencias y ubicaciones
-    return res.json(bienes);
+    // Devolver las sedes, dependencias y ubicaciones sin duplicados
+    return res.json({
+      sedes: sedes,
+      dependencias: dependencias,
+      ubicaciones: ubicaciones,
+    });
   } catch (error) {
     console.log(error);
-    res.status(500).json({ message: "Error fetching data", error: error.message });
+    res
+      .status(500)
+      .json({ message: "Error fetching data", error: error.message });
   }
 };
 
 const bienesPorTrabajador = async (req, res) => {
   try {
     const { models } = await getDatabaseConnection();
-    
+
     const dniTrabajador = req.query.dni; // DNI del trabajador seleccionado
     const sedeId = req.query.sedeId; // Sede seleccionada
     const dependenciaId = req.query.dependenciaId; // Dependencia seleccionada
@@ -293,6 +365,7 @@ const bienesPorTrabajador = async (req, res) => {
     if (ubicacionId) {
       whereConditions.ubicacion_id = ubicacionId;
     }
+    whereConditions.inventariado = true;
 
     // Verificar si hay al menos una condición
     if (Object.keys(whereConditions).length === 0) {
@@ -314,11 +387,15 @@ const bienesPorTrabajador = async (req, res) => {
         "modelo",
         "color",
         "serie",
+        "estado_patrimonial",
+        "detalles",
+        "situacion",
+        "secuencia"
       ],
       include: [
         {
           model: models.ubicaciones,
-          attributes: ["tipo_ubicac", "ubicac_fisica"],
+          attributes: ["tipo_ubicac", "ubicac_fisica", "nombre"],
         },
         {
           model: models.sedes,
@@ -328,6 +405,15 @@ const bienesPorTrabajador = async (req, res) => {
           model: models.dependencias,
           attributes: ["nombre"],
         },
+        {
+          model: models.usuarios,
+          include: [
+            { model: models.inventariadores, attributes: ["nombre"] },
+            { model: models.jefes, include: [{ model: models.grupos }] },
+          ],
+        },
+
+        { model: models.trabajadores, attributes: ["nombre"] },
       ],
     });
 
@@ -338,11 +424,20 @@ const bienesPorTrabajador = async (req, res) => {
       });
     }
 
+    const format = bienes.map((item, index) => {
+      return {
+        ...item.get(), // Convierte la instancia de Sequelize a un objeto plano
+        id: index + 1, // Asigna un nuevo ID secuencial
+      };
+    });
+
     // Devolver la lista de bienes
-    return res.json(bienes);
+    return res.json(format);
   } catch (error) {
     console.log(error);
-    res.status(500).json({ message: "Error fetching data", error: error.message });
+    res
+      .status(500)
+      .json({ message: "Error fetching data", error: error.message });
   }
 };
 
@@ -362,6 +457,7 @@ const getConsultaBienes = async (req, res) => {
     if (dni) whereConditions.dni = dni;
     if (sbn) whereConditions.sbn = sbn;
     if (serie) whereConditions.serie = serie;
+    whereConditions.inventariado = true;
     // whereConditions.inventariado = false;
 
     // Realizar la consulta a la base de datos
@@ -389,16 +485,45 @@ const getSigaToDB = async (req, res) => {
     const dependencias = await models.dependencias.findAll();
     const ubicaciones = await models.ubicaciones.findAll();
 
+    console.log(dependencias);
+    console.log(ubicaciones);
     // Hacer fetch a la API externa
     let url = "http://localhost:3001/api/v1/bienes/prueba";
     const response = await fetch(url);
     const externalData = await response.json();
 
     // Mapear los datos y buscar los IDs correspondientes
-    const format = externalData?.data?.map(item => {
-      // Buscar los IDs en las tablas de dependencias y ubicaciones
-      const dependencia = dependencias.find(dep => dep.centro_costo === item.CENTRO_COSTO);
-      const ubicacion = ubicaciones.find(ubi => ubi.nombre === item.UBICAC_FISICA);
+    const format = externalData?.data?.map((item) => {
+      let dependenciaId = null;
+      let ubicacionId = null;
+
+      // Buscar la dependencia (TiPO_UBICAC es 1 y COD_UBICAC es 0)
+      if (item.TIPO_UBICAC === 1 && item.COD_UBICAC === 0) {
+        dependenciaId = dependencias.find(
+          (dep) =>
+            dep.centro_costo === item.CENTRO_COSTO &&
+            dep.tipo_ubicacion === item.TIPO_UBICAC
+        )?.id;
+      }
+
+      // Buscar la ubicación (TiPO_UBICAC es 1 y COD_UBICAC es distinto de 0)
+      if (item.TIPO_UBICAC === 1 && item.COD_UBICAC !== 0) {
+        ubicacionId = ubicaciones.find(
+          (ubi) =>
+            ubi.nombre === item.UBICAC_FISICA &&
+            ubi.tipo_ubicacion === item.TIPO_UBICAC
+        )?.id;
+      }
+
+      // Manejar el caso donde la dependencia es 0 y también se considera una ubicación
+      if (item.TIPO_UBICAC === 0) {
+        // Suponiendo que aquí puedes tener ubicaciones que son dependencias
+        ubicacionId = ubicaciones.find(
+          (ubi) =>
+            ubi.nombre === item.UBICAC_FISICA &&
+            ubi.tipo_ubicacion === item.TIPO_UBICAC
+        )?.id;
+      }
 
       return {
         secuencia: item.SECUENCIA,
@@ -409,18 +534,19 @@ const getSigaToDB = async (req, res) => {
         serie: item.NRO_SERIE,
         estado: item.ESTADO,
         sede_id: item.SEDE,
-        ubicacion_id: ubicacion ? ubicacion.id : null, // Asignar el ID de la ubicación
-        dependencia_id: dependencia ? dependencia.id : null, // Asignar el ID de la dependencia
+        ubicacion_id: ubicacionId, // Asignar el ID de la ubicación
+        dependencia_id: dependenciaId, // Asignar el ID de la dependencia
         dni: item.DOCUM_IDENT,
         estado_patrimonial: item.ESTADO_CONSERV,
-        detalles: item.CARACTERISTICAS
+        detalles: item.CARACTERISTICAS,
       };
     });
 
-    await models.bienes.bulkCreate(format)
-
+    // await models.bienes.bulkCreate(format, {
+    //   ignoreDuplicates: true, // Ignorar duplicados si es necesario
+    // });
     // Devolver los bienes filtrados
-    return res.json({ data: format });
+    return res.json({ data: externalData });
   } catch (error) {
     console.log(error);
     res
@@ -428,7 +554,6 @@ const getSigaToDB = async (req, res) => {
       .json({ message: "Error fetching data", error: error.message });
   }
 };
-
 
 module.exports = {
   getBienesSiga,
@@ -440,5 +565,6 @@ module.exports = {
   getConsultaBienes,
   getSigaToDB,
   getBienesPorInventariador,
-  sedesPorTrabajador
+  sedesPorTrabajador,
+  getBienesFaltantes,
 };

@@ -47,8 +47,8 @@ function initModels(sequelize) {
   Usuarios.belongsTo(Roles, { foreignKey: "rol_id" });
   Jefes.hasMany(Usuarios, { foreignKey: "jefe_id" });
   Usuarios.belongsTo(Jefes, { foreignKey: "jefe_id" });
-  // Inventariadores.hasMany(Usuarios, { foreignKey: "inventariador_id" });
-  // Usuarios.belongsTo(Inventariadores, { foreignKey: "inventariador_id" });
+  Inventariadores.hasMany(Usuarios, { foreignKey: "inventariador_id" });
+  Usuarios.belongsTo(Inventariadores, { foreignKey: "inventariador_id" });
   Usuarios.belongsToMany(Permisos, {
     through: UsuarioPermiso,
     foreignKey: "usuario_id",
