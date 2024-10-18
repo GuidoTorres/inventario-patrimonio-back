@@ -256,12 +256,44 @@ const postBienes = async (req, res) => {
 
     if (bienExistente) {
       // Si el bien ya existe, actualízalo
-      bien = await models.bienes.update(req.body, {
+      await models.bienes.update(req.body, {
         where: { sbn: req.body.sbn },
       });
+      bien = bienExistente;
     } else {
       // Si no existe, créalo
       bien = await models.bienes.create(req.body);
+    }
+
+    // Manejo de imágenes
+    if (req.files && req.files.imagen) {
+      const imagen = req.files.imagen;
+      const nombreImagen = `${req.body.sbn}.png`; // Renombrar la imagen con el SBN
+      const carpetaServidor = path.join(__dirname, '..', 'uploads'); // Ruta a la carpeta en el servidor
+
+      // Crear la carpeta si no existe
+      if (!fs.existsSync(carpetaServidor)) {
+        fs.mkdirSync(carpetaServidor, { recursive: true });
+      }
+
+      // Ruta completa para guardar la imagen
+      const archivoImagenRuta = path.join(carpetaServidor, nombreImagen);
+
+      // Guardar la nueva imagen en el servidor
+      imagen.mv(archivoImagenRuta, (err) => {
+        if (err) {
+          return res.status(500).json({ message: "Error al guardar la imagen", error: err.message });
+        }
+      });
+
+      // Ruta pública para acceder a la imagen
+      const urlImagen = `http://localhost:3006/uploads/${nombreImagen}`;
+
+      // Actualizar la base de datos con la ruta de la imagen
+      await models.bienes.update(
+        { foto: urlImagen }, // Asumiendo que tienes un campo para la ruta de la imagen
+        { where: { sbn: req.body.sbn } }
+      );
     }
 
     const io = req.app.locals.io;
@@ -285,6 +317,7 @@ const postBienes = async (req, res) => {
     res.status(500).json({ message: "Error fetching data", error: error.message });
   }
 };
+
 
 const sedesPorTrabajador = async (req, res) => {
   try {
@@ -502,14 +535,19 @@ const getConsultaBienes = async (req, res) => {
     // whereConditions.inventariado = false;
 
     // Realizar la consulta a la base de datos
-    const bienes = await models.bienes.findAll({
+    const bien = await models.bienes.findAll({
       attributes: { exclude: ["trabajador_id"] },
-
+      include: [
+        { model: models.sedes },
+        { model: models.dependencias },
+        { model: models.ubicaciones },
+        { model: models.trabajadores },
+      ],
       where: whereConditions,
     });
 
     // Devolver los bienes filtrados
-    return res.json({ data: bienes });
+    return res.json({ data: bien });
   } catch (error) {
     console.log(error);
     res
@@ -759,7 +797,7 @@ const getEstadisticasBiens = async (req, res) => {
 const generarSbnSobrante = async (req, res) => {
   try {
     const { models } = await getDatabaseConnection();
-    
+
     const { id_usuario, id_sede, id_ubicacion } = req.query;
 
     // Obtener el grupo basado en el id_usuario

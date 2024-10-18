@@ -2,69 +2,70 @@ const { Op } = require("sequelize");
 const { getDatabaseConnection } = require("./../../config/config");
 
 const estadisticasUso = async (req, res) => {
-    try {
-      const { models } = await getDatabaseConnection();
-  
-      const bienes = await models.bienes.findAll({
-        where: {
-          inventariado: true, // Filtrar solo los bienes inventariados
+  try {
+    const { models } = await getDatabaseConnection();
+
+    const bienes = await models.bienes.findAll({
+      where: {
+        inventariado: true, // Filtrar solo los bienes inventariados
+      },
+      include: [
+        { model: models.sedes },
+        { model: models.dependencias },
+        { model: models.ubicaciones },
+      ],
+    });
+
+    const conteosBienes = {
+      bienesEnUso: 0,
+      bienesEnDesuso: 0,
+    };
+
+    bienes.forEach(({ situacion }) => {
+      if (situacion) {
+        conteosBienes.bienesEnUso += 1; // Eliminado el operador opcional
+      } else {
+        conteosBienes.bienesEnDesuso += 1; // Eliminado el operador opcional
+      }
+    });
+
+    // Filtrar etiquetas y datos donde el valor es mayor que 0
+    const filteredLabels = ["Bienes en Uso", "Bienes en Desuso"].filter(
+      (label, index) => Object.values(conteosBienes)[index] > 0
+    );
+    const filteredData = Object.values(conteosBienes).filter(
+      (value) => value > 0
+    );
+
+    const predefinedColors = [
+      "rgba(75, 192, 192, 0.8)", // Verde para bienes en uso
+      "rgba(255, 99, 132, 0.8)", // Rojo para bienes en desuso
+    ];
+
+    const filteredColors = predefinedColors.filter(
+      (color, index) => Object.values(conteosBienes)[index] > 0
+    );
+
+    const data = {
+      labels: filteredLabels, // Etiquetas filtradas
+      datasets: [
+        {
+          label: `Cantidad de Bienes`,
+          data: filteredData, // Datos filtrados
+          backgroundColor: filteredColors, // Colores filtrados
+          borderColor: filteredColors.map((color) => color.replace("0.8", "1")),
+          borderWidth: 1,
         },
-        include: [
-          { model: models.sedes },
-          { model: models.dependencias },
-          { model: models.ubicaciones },
-        ],
-      });
-  
-      const conteosBienes = {
-        bienesEnUso: 0,
-        bienesEnDesuso: 0,
-      };
-  
-      bienes.forEach(({ situacion }) => {
-        if (situacion) {
-          conteosBienes.bienesEnUso += 1;
-        } else {
-          conteosBienes.bienesEnDesuso += 1;
-        }
-      });
-  
-      // Filtrar etiquetas y datos donde el valor es mayor que 0
-      const filteredLabels = ["Bienes en Uso", "Bienes en Desuso"].filter(
-        (label, index) => Object.values(conteosBienes)[index] > 0
-      );
-      const filteredData = Object.values(conteosBienes).filter(
-        (value) => value > 0
-      );
-  
-      const predefinedColors = [
-        "rgba(75, 192, 192, 0.8)", // Verde para bienes en uso
-        "rgba(255, 99, 132, 0.8)", // Rojo para bienes en desuso
-      ];
-  
-      const filteredColors = predefinedColors.filter(
-        (color, index) => Object.values(conteosBienes)[index] > 0
-      );
-  
-      const data = {
-        labels: filteredLabels, // Etiquetas filtradas
-        datasets: [
-          {
-            label: `Cantidad de Bienes`,
-            data: filteredData, // Datos filtrados
-            backgroundColor: filteredColors, // Colores filtrados
-            borderColor: filteredColors.map((color) => color.replace("0.8", "1")),
-            borderWidth: 1,
-          },
-        ],
-      };
-  
-      return res.json({ chartData: data, cantidadTotal: bienes.length });
-    } catch (error) {
-      console.error("Error al obtener los bienes inventariados:", error);
-      res.status(500).json({ message: "Error fetching data", error: error.message });
-    }
-  };
+      ],
+    };
+
+    return res.json({ chartData: data, cantidadTotal: bienes.length });
+  } catch (error) {
+    console.error("Error al obtener los bienes inventariados:", error);
+    res.status(500).json({ message: "Error fetching data", error: error.message });
+  }
+};
+
   
   const estadisticasTipo = async (req, res) => {
     try {
