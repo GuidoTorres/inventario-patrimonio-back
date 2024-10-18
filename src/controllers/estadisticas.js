@@ -150,7 +150,7 @@ const estadisticasUso = async (req, res) => {
       const conteosSedes = {};
   
       bienes.forEach(({ sede }) => {
-        const nombreSede = sede.nombre;
+        const nombreSede = sede?.nombre;
         if (conteosSedes[nombreSede]) {
           conteosSedes[nombreSede] += 1;
         } else {

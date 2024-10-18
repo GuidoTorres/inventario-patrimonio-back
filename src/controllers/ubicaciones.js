@@ -37,23 +37,24 @@ const getUbicacionesEditar = async (req, res) => {
       include: [
         {
           model: models.dependencias,
-          attributes: ["id","nombre"],
-          include: [{ model: models.sedes, attributes: ["id","nombre"] }],
+          attributes: ["id", "nombre", "tipo_ubicac", "ubicac_fisica"],
+          include: [{ model: models.sedes, attributes: ["id", "nombre"] }],
         },
       ],
     });
 
-    const format= ubicaciones.map(item =>{
-        return{
-            id: item?.id,
-            dependencia_id: item?.dependencia?.id,
-            nombre_dependencia: item?.dependencia?.nombre,
-            sede_id: item?.dependencia?.sede?.id,
-            nombre_sede: item?.dependencia?.sede?.nombre,
-            ubicacion: item?.nombre
-        }
-    })
-
+    const format = ubicaciones.map((item) => {
+      return {
+        id: item?.id,
+        dependencia_id: item?.dependencia?.id,
+        nombre_dependencia: item?.dependencia?.nombre,
+        sede_id: item?.dependencia?.sede?.id,
+        nombre_sede: item?.dependencia?.sede?.nombre,
+        ubicacion: item?.nombre,
+        tipo_ubicac: item?.tipo_ubicac,
+        ubicac_fisica: item?.ubicac_fisica
+      };
+    });
 
     return res.json(format);
   } catch (error) {
@@ -86,24 +87,21 @@ const postUbicaciones = async (req, res) => {
     let newUbicacFisica;
 
     if (lastUbicacion) {
-      // Si se encontró un valor máximo, incrementarlo
       newUbicacFisica = lastUbicacion.ubicac_fisica + 1;
     } else {
-      // Si no existe ninguna ubicación previa, empezar desde "1"
       newUbicacFisica = "1";
     }
 
     const info = {
       nombre,
       dependencia_id,
-      tipo_ubicac: dependencia_id, // Asumo que 'tipo_ubicac' es lo mismo que 'dependencia_id'
-      ubicac_fisica: newUbicacFisica, // Aquí se usa el valor incrementado
+      tipo_ubicac: dependencia_id,
+      ubicac_fisica: newUbicacFisica,
     };
 
     console.log(info);
 
-    // Crear la nueva ubicación
-    //   await models.ubicaciones.create(info);
+    await models.ubicaciones.create(info);
 
     return res.json({
       msg: "Ubicación creada con éxito!",
@@ -140,7 +138,7 @@ const deleteUbicaciones = async (req, res) => {
     const { models } = await getDatabaseConnection();
 
     await models.ubicaciones.destroy({
-      where: { id: id },
+      where: { id: req.params.id },
     });
 
     return res.json({ msg: "Ubicación eliminada con éxito!" });

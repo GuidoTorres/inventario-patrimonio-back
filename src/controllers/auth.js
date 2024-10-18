@@ -1,13 +1,25 @@
-const {getDatabaseConnection} = require("./../../config/config");
+const { getDatabaseConnection } = require("./../../config/config");
 const { tokenSign } = require("../helpers/generateToken");
 const { compare } = require("../helpers/handleBcrypt");
 const authLogin = async (req, res, next) => {
   try {
-    const {models} = await getDatabaseConnection(); 
+    const { models } = await getDatabaseConnection();
 
     const { usuario, contrasenia } = req.body;
     const get = await models.usuarios.findOne({
       where: { nombre_usuario: usuario },
+      include: [
+        {
+          model: models.inventariadores,
+          attributes: [],
+          include: { model: models.grupos },
+        },
+        {
+          model: models.jefes,
+          attributes: [],
+          include: { model: models.grupos },
+        },
+      ],
     });
 
     if (!get) {
@@ -15,8 +27,11 @@ const authLogin = async (req, res, next) => {
         .status(404)
         .send({ msg: "Usuario no encontrado!", status: 404 });
     }
-
-    const checkPassword = await compare(contrasenia, get.dataValues.contrasenia);
+    console.log(get);
+    const checkPassword = await compare(
+      contrasenia,
+      get.dataValues.contrasenia
+    );
     const tokenSession = await tokenSign(get.dataValues);
     if (get.estado === false) {
       return res.status(500).send({ msg: "Usuario inactivo!", status: 500 });

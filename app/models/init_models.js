@@ -12,6 +12,7 @@ const RolModel = require("./roles");
 const PermisoModel = require("./permisos");
 const UsuarioPermisoModel = require("./usuario_permisos");
 const ubicaciones = require("./ubicaciones");
+const Bienes23Model = require("./bienes23")
 function initModels(sequelize) {
   const Bienes = BienModel(sequelize, Sequelize);
   const Sedes = SedeModel(sequelize, Sequelize);
@@ -25,6 +26,7 @@ function initModels(sequelize) {
   const Roles = RolModel(sequelize, Sequelize);
   const Permisos = PermisoModel(sequelize, Sequelize);
   const UsuarioPermiso = UsuarioPermisoModel(sequelize, Sequelize)
+  const Bienes23= Bienes23Model(sequelize, Sequelize)
   Sedes.hasMany(Dependencias, {foreignKey:"sede_id"})
   Dependencias.belongsTo(Sedes, {foreignKey:"sede_id"})
 
@@ -78,6 +80,7 @@ function initModels(sequelize) {
     Trabajadores,
     Usuarios,
     Roles,
+    Bienes23
   };
 }
 
