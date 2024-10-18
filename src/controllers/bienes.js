@@ -124,7 +124,7 @@ const getBienes = async (req, res) => {
 
       // Si se encuentra un archivo de imagen, construir la URL para acceder a la imagen
       if (archivoImagen) {
-        imageUrl = `http://localhost:3006/api/v1/bienes/imagenes/${bien?.sbn}/${archivoImagen}`;
+        imageUrl = `http://10.30.1.49/api/v1/bienes/imagenes/${bien?.sbn}/${archivoImagen}`;
       }
     }
 
