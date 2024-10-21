@@ -128,6 +128,7 @@ const getBienes = async (req, res) => {
       }
     }
 
+    console.log(imageUrl);
     // Preparar la información del bien con la URL de la imagen si está disponible
     const info = {
       ...bien.dataValues,
