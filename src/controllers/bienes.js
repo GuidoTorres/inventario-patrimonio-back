@@ -111,15 +111,18 @@ const getBienes = async (req, res) => {
 
     // Caso 3: El bien no ha sido inventariado, intentar obtener la imagen desde la red compartida
     const carpetaRuta = `\\\\10.30.1.22\\patrimonio\\Docpat\\1137\\2024\\Margesi\\${bien?.sbn}`;
-    console.log(carpetaRuta);
+
     // Verificar si la carpeta existe
     if (fs.existsSync(carpetaRuta)) {
       const archivos = fs.readdirSync(carpetaRuta);
+
+      // Buscar un archivo de imagen cuyo nombre contenga el `sbn`
       const archivoImagen = archivos.find(
         (file) =>
-          file.endsWith(".jpg") ||
-          file.endsWith(".jpeg") ||
-          file.endsWith(".png")
+          file.includes(bien.sbn) &&
+          (file.endsWith(".jpg") ||
+            file.endsWith(".jpeg") ||
+            file.endsWith(".png"))
       );
 
       // Si se encuentra un archivo de imagen, construir la URL para acceder a la imagen
@@ -128,7 +131,6 @@ const getBienes = async (req, res) => {
       }
     }
 
-    console.log(imageUrl);
     // Preparar la información del bien con la URL de la imagen si está disponible
     const info = {
       ...bien.dataValues,
