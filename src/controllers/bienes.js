@@ -175,7 +175,6 @@ const getBienesInventariados = async (req, res) => {
 const getBienesFaltantes = async (req, res) => {
   try {
     const { models } = await getDatabaseConnection();
-    
 
     const bien = await models.bienes.findAll({
       attributes: { exclude: ["trabajador_id"] },
@@ -345,17 +344,19 @@ const updateFaltantes = async (req, res) => {
     const sbnArray = req.body.sbn;
 
     if (!Array.isArray(sbnArray) || sbnArray.length === 0) {
-      return res.status(400).json({ message: "No se proporcionó un array válido de SBN." });
+      return res
+        .status(400)
+        .json({ message: "No se proporcionó un array válido de SBN." });
     }
 
     // Actualizar todos los bienes que coincidan con los SBN proporcionados
     await models.bienes.update(
       { tipo: "faltante", inventariado: true }, // Actualizamos el tipo y el estado inventariado
-      { where: { sbn: { [Op.in]: sbnArray } } }  // Usamos el operador IN para actualizar múltiples registros
+      { where: { sbn: { [Op.in]: sbnArray } } } // Usamos el operador IN para actualizar múltiples registros
     );
 
     return res.json({
-      msg: "Faltantes actualizados con éxito!"
+      msg: "Faltantes actualizados con éxito!",
     });
   } catch (error) {
     console.error(error);
@@ -364,7 +365,6 @@ const updateFaltantes = async (req, res) => {
       .json({ msg: "Error al procesar los faltantes", error: error.message });
   }
 };
-
 
 const sedesPorTrabajador = async (req, res) => {
   try {
@@ -516,18 +516,18 @@ const bienesPorTrabajador = async (req, res) => {
       include: [
         {
           model: models.ubicaciones,
-          where:{id:ubicacionId},
+          where: { id: ubicacionId },
           attributes: ["tipo_ubicac", "ubicac_fisica", "nombre"],
         },
         {
           model: models.sedes,
-          where:{id:sedeId},
+          where: { id: sedeId },
 
           attributes: ["nombre"],
         },
         {
           model: models.dependencias,
-          where:{id:dependenciaId},
+          where: { id: dependenciaId },
 
           attributes: ["nombre"],
         },
@@ -587,10 +587,10 @@ const getConsultaBienes = async (req, res) => {
     if (dni) whereConditions.dni = dni;
     if (sbn) whereConditions.sbn = sbn;
     if (serie) whereConditions.serie = serie;
-    if (inventariado === 'true') {
-      whereConditions.inventariado = true;  // Buscar donde 'inventariado' es true
-    } else if (inventariado === 'false') {
-      whereConditions.inventariado = { [Op.not]: true };  // Buscar donde 'inventariado' es false o null
+    if (inventariado === "true") {
+      whereConditions.inventariado = true; // Buscar donde 'inventariado' es true
+    } else if (inventariado === "false") {
+      whereConditions.inventariado = { [Op.not]: true }; // Buscar donde 'inventariado' es false o null
     }
     // whereConditions.inventariado = false;
 
@@ -607,7 +607,7 @@ const getConsultaBienes = async (req, res) => {
     });
 
     // Devolver los bienes filtrados
-    return res.json( {bien} );
+    return res.json({ bien });
   } catch (error) {
     console.log(error);
     res
@@ -616,8 +616,7 @@ const getConsultaBienes = async (req, res) => {
   }
 };
 
-
-const getSigaToDB = async () => {
+const getSigaToDB = async (req, res) => {
   try {
     const { models } = await getDatabaseConnection(); // Asegúrate de tener la conexión configurada
 
@@ -653,27 +652,41 @@ const getSigaToDB = async () => {
     }
 
     // Obtener los valores de las tablas 'dependencias' y 'ubicaciones'
-    const dependencias = await models.dependencias.findAll();
-    const ubicaciones = await models.ubicaciones.findAll();
+    const dependencias = await models.dependencias.findAll({
+      attributes: ["id", "tipo_ubicac"], // Solo se necesita tipo_ubicac para dependencias
+    });
+
+    const ubicaciones = await models.ubicaciones.findAll({
+      attributes: ["id", "tipo_ubicac", "ubicac_fisica"], // Para ubicaciones usamos ambos campos
+    });
 
     // Mapear los datos y buscar los IDs correspondientes
     const format = nuevosBienes?.map((item) => {
       let dependenciaId = null;
       let ubicacionId = null;
 
-      if (item.TIPO_UBICAC === 1 && item.COD_UBICAC === 0) {
+      // Buscar la dependencia por tipo_ubicac (sin necesidad de comparar con ubicac_fisica)
+      if (item.COD_UBICAC === "0") {
+        // Si COD_UBICAC es "0", lo tratamos como una dependencia
         dependenciaId = dependencias.find(
-          (dep) =>
-            dep.centro_costo === item.CENTRO_COSTO &&
-            dep.tipo_ubicacion === item.TIPO_UBICAC
+          (dep) => Number(dep.tipo_ubicac) === Number(item.TIPO_UBICAC)
         )?.id;
       }
-
-      if (item.TIPO_UBICAC === 1 && item.COD_UBICAC !== 0) {
+      
+      if (item.COD_UBICAC == "0") {
+        ubicacionId = ubicaciones.find(
+          
+          (ubi) =>
+            Number(ubi.tipo_ubicac) === Number(item.TIPO_UBICAC) &&
+            Number(ubi.ubicac_fisica) === Number(item.COD_UBICAC)
+        )?.id;
+      }
+      // Buscar la ubicación por tipo_ubicac y ubicac_fisica si COD_UBICAC no es "0"
+      if (item.COD_UBICAC !== "0") {
         ubicacionId = ubicaciones.find(
           (ubi) =>
-            ubi.nombre === item.UBICAC_FISICA &&
-            ubi.tipo_ubicacion === item.TIPO_UBICAC
+            Number(ubi.tipo_ubicac) === Number(item.TIPO_UBICAC) &&
+            Number(ubi.ubicac_fisica) === Number(item.COD_UBICAC)
         )?.id;
       }
 
@@ -688,9 +701,10 @@ const getSigaToDB = async () => {
         sede_id: item.SEDE,
         ubicacion_id: ubicacionId,
         dependencia_id: dependenciaId,
-        dni: item.DOCUM_IDENT,
+        dni: item.docum_ident,
         estado_patrimonial: item.ESTADO_CONSERV,
         detalles: item.CARACTERISTICAS,
+        observacin: item.OBSERVACIONES
       };
     });
 
@@ -701,11 +715,17 @@ const getSigaToDB = async () => {
       "Sincronización completa. Nuevos bienes insertados:",
       format.length
     );
+    return res.json({ message: "Sincronización completada", format });
   } catch (error) {
     console.log(error);
-    console.error("Error durante la sincronización:", error.message);
+    return res
+      .status(500)
+      .json({ message: "Error durante la sincronización", error: error.message });
   }
 };
+
+
+
 
 const getBienesSigaSbn = async (req, res) => {
   try {
@@ -968,5 +988,5 @@ module.exports = {
   getBienesSigaSbn,
   getEstadisticasBiens,
   generarSbnSobrante,
-  updateFaltantes
+  updateFaltantes,
 };
