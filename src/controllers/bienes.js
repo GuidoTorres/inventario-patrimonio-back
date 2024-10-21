@@ -91,14 +91,14 @@ const getBienes = async (req, res) => {
       if (!bien23) {
         return res.status(404).json({
           msg: "El bien no fue encontrado en ninguna tabla.",
-          data: null, // O puedes retornar un array vacío si prefieres
+          data: null,
         });
       }
 
       // Caso 1.2: El bien se encuentra en 'bienes23'
       return res.status(200).json({
         msg: "El bien fue encontrado en la tabla bienes.",
-        info: format, // Devolver la información del bien de la tabla 'bienes23'
+        info: format,
       });
     }
 
@@ -109,7 +109,7 @@ const getBienes = async (req, res) => {
       });
     }
 
-    // Caso 3: El bien no ha sido inventariado, obtener imagen si está disponible
+    // Caso 3: El bien no ha sido inventariado, intentar obtener la imagen desde la red compartida
     const carpetaRuta = `\\\\10.30.1.22\\patrimonio\\Docpat\\1137\\2024\\Margesi\\${bien?.sbn}`;
 
     // Verificar si la carpeta existe
@@ -128,13 +128,13 @@ const getBienes = async (req, res) => {
       }
     }
 
-    // Preparar la información del bien con la URL de la imagen
+    // Preparar la información del bien con la URL de la imagen si está disponible
     const info = {
       ...bien.dataValues,
-      imagen: imageUrl, // URL para acceder a la imagen
+      imagen: imageUrl || null, // Devolver la URL si existe, si no, null
     };
 
-    // Devolver la información del bien con la URL de la imagen
+    // Devolver la información del bien
     return res.status(200).json({ info });
   } catch (error) {
     console.log(error);
@@ -143,6 +143,7 @@ const getBienes = async (req, res) => {
       .json({ message: "Error fetching data", error: error.message });
   }
 };
+
 
 const getBienesInventariados = async (req, res) => {
   try {
