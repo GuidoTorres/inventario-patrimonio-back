@@ -7,7 +7,7 @@ const getMarcas = async (req, res) => {
     const { models } = await getDatabaseConnection(); // Asegúrate de tener la conexión configurada
 
     // Hacer fetch a la API externa
-    let url = "http://10.30.1.49/api/v1/marcas";
+    let url = "http://10.30.1.43/api/v1/marcas";
     const response = await fetch(url);
     const externalData = await response.json();
 //prueba
