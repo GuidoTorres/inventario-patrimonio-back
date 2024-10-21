@@ -631,7 +631,7 @@ const getSigaToDB = async (req, res) => {
     );
 
     // Hacer fetch a la API externa
-    let url = "http://localhost:3001/api/v1/bienes/prueba";
+    let url = "http://10.30.1.49/api/v1/bienes/prueba";
     const response = await fetch(url);
 
     if (!response.ok) {
@@ -749,7 +749,7 @@ const getBienesSigaSbn = async (req, res) => {
     // Verificar si el bien no existe
     if (!bien) {
       // Hacer fetch a la API externa
-      let url = `http://localhost:3006/api/v1/bienes/sbn?sbn=${sbn}`;
+      let url = `http://10.30.1.49/api/v1/bienes/sbn?sbn=${sbn}`;
       const response = await fetch(url);
 
       console.log(response);
