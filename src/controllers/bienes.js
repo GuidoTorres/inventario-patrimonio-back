@@ -111,7 +111,7 @@ const getBienes = async (req, res) => {
 
     // Caso 3: El bien no ha sido inventariado, intentar obtener la imagen desde la red compartida
     const carpetaRuta = `\\\\10.30.1.22\\patrimonio\\Docpat\\1137\\2024\\Margesi\\${bien?.sbn}`;
-
+    console.log(carpetaRuta);
     // Verificar si la carpeta existe
     if (fs.existsSync(carpetaRuta)) {
       const archivos = fs.readdirSync(carpetaRuta);
