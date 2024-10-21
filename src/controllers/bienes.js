@@ -84,7 +84,7 @@ const getBienes = async (req, res) => {
       const format = {
         sbn: bien23.SBN,
         descripcion: bien23.descripcion,
-        tipo: "sobrante"
+        tipo: "sobrante",
       };
 
       // Caso 1.1: El bien no existe en ninguna de las tablas
@@ -159,6 +159,7 @@ const getBienesInventariados = async (req, res) => {
         { model: models.ubicaciones },
         { model: models.trabajadores },
       ],
+      order: [["updatedAt", "DESC"]],
     });
 
     // Devolver la información del bien con la URL de la imagen
@@ -174,6 +175,7 @@ const getBienesInventariados = async (req, res) => {
 const getBienesFaltantes = async (req, res) => {
   try {
     const { models } = await getDatabaseConnection();
+    
 
     const bien = await models.bienes.findAll({
       attributes: { exclude: ["trabajador_id"] },
@@ -246,7 +248,6 @@ const getBienImagen = async (req, res) => {
   }
 };
 
-
 const postBienes = async (req, res) => {
   try {
     const { models } = await getDatabaseConnection();
@@ -255,7 +256,6 @@ const postBienes = async (req, res) => {
     const bienExistente = await models.bienes.findOne({
       where: { sbn: req.body.sbn },
     });
-    console.log("prueba");
     let bien;
 
     // Si el bien ya existe, actualízalo; si no, créalo
@@ -268,10 +268,13 @@ const postBienes = async (req, res) => {
       bien = await models.bienes.create(req.body);
     }
     // Manejo de imágenes si se ha subido una
-    if (req.file) { // req.file contiene toda la información del archivo
-      const imagen = req.file; 
-      const nombreImagen = `${req.body.sbn}${path.extname(imagen.originalname)}`; // Renombrar la imagen con el SBN y la extensión correcta
-      const carpetaServidor = path.join(__dirname, '..', 'uploads'); // Ruta a la carpeta en el servidor
+    if (req.file) {
+      // req.file contiene toda la información del archivo
+      const imagen = req.file;
+      const nombreImagen = `${req.body.sbn}${path.extname(
+        imagen.originalname
+      )}`; // Renombrar la imagen con el SBN y la extensión correcta
+      const carpetaServidor = path.join(__dirname, "..", "uploads"); // Ruta a la carpeta en el servidor
 
       // Crear la carpeta si no existe
       if (!fs.existsSync(carpetaServidor)) {
@@ -280,7 +283,12 @@ const postBienes = async (req, res) => {
 
       // Verificar si el bien ya tenía una imagen anterior y eliminarla
       if (bienExistente && bienExistente.foto) {
-        const rutaImagenAnterior = path.join(__dirname, '..', 'uploads', path.basename(bienExistente.foto));
+        const rutaImagenAnterior = path.join(
+          __dirname,
+          "..",
+          "uploads",
+          path.basename(bienExistente.foto)
+        );
         if (fs.existsSync(rutaImagenAnterior)) {
           fs.unlinkSync(rutaImagenAnterior); // Eliminar la imagen anterior
         }
@@ -316,16 +324,46 @@ const postBienes = async (req, res) => {
     });
 
     return res.json({
-      msg: bienExistente ? "Bien actualizado con éxito!" : "Bien creado con éxito!",
+      msg: bienExistente
+        ? "Bien actualizado con éxito!"
+        : "Bien creado con éxito!",
       bien: bien, // Asegurarse de que 'bien' contenga la nueva foto
     });
   } catch (error) {
     console.log(error);
-    return res.status(500).json({ message: "Error al procesar el bien", error: error.message });
+    return res
+      .status(500)
+      .json({ message: "Error al procesar el bien", error: error.message });
   }
 };
 
+const updateFaltantes = async (req, res) => {
+  try {
+    const { models } = await getDatabaseConnection();
 
+    // Verificar que se está recibiendo un array de `sbn` en req.body.sbn
+    const sbnArray = req.body.sbn;
+
+    if (!Array.isArray(sbnArray) || sbnArray.length === 0) {
+      return res.status(400).json({ message: "No se proporcionó un array válido de SBN." });
+    }
+
+    // Actualizar todos los bienes que coincidan con los SBN proporcionados
+    await models.bienes.update(
+      { tipo: "faltante", inventariado: true }, // Actualizamos el tipo y el estado inventariado
+      { where: { sbn: { [Op.in]: sbnArray } } }  // Usamos el operador IN para actualizar múltiples registros
+    );
+
+    return res.json({
+      msg: "Faltantes actualizados con éxito!"
+    });
+  } catch (error) {
+    console.error(error);
+    return res
+      .status(500)
+      .json({ msg: "Error al procesar los faltantes", error: error.message });
+  }
+};
 
 
 const sedesPorTrabajador = async (req, res) => {
@@ -478,14 +516,19 @@ const bienesPorTrabajador = async (req, res) => {
       include: [
         {
           model: models.ubicaciones,
+          where:{id:ubicacionId},
           attributes: ["tipo_ubicac", "ubicac_fisica", "nombre"],
         },
         {
           model: models.sedes,
+          where:{id:sedeId},
+
           attributes: ["nombre"],
         },
         {
           model: models.dependencias,
+          where:{id:dependenciaId},
+
           attributes: ["nombre"],
         },
         {
@@ -496,7 +539,11 @@ const bienesPorTrabajador = async (req, res) => {
           ],
         },
 
-        { model: models.trabajadores, attributes: ["nombre"] },
+        {
+          model: models.trabajadores,
+          where: { dni: dniTrabajador },
+          attributes: ["nombre"],
+        },
       ],
     });
 
@@ -529,7 +576,7 @@ const getConsultaBienes = async (req, res) => {
     const { models } = await getDatabaseConnection();
 
     // Obtener los parámetros de búsqueda de la solicitud
-    const { sede_id, ubicacion_id, dni, sbn, serie } = req.query;
+    const { sede_id, ubicacion_id, dni, sbn, serie, inventariado } = req.query;
 
     // Construir el objeto 'where' dinámico
     const whereConditions = {};
@@ -540,7 +587,11 @@ const getConsultaBienes = async (req, res) => {
     if (dni) whereConditions.dni = dni;
     if (sbn) whereConditions.sbn = sbn;
     if (serie) whereConditions.serie = serie;
-    whereConditions.inventariado = true;
+    if (inventariado === 'true') {
+      whereConditions.inventariado = true;  // Buscar donde 'inventariado' es true
+    } else if (inventariado === 'false') {
+      whereConditions.inventariado = { [Op.not]: true };  // Buscar donde 'inventariado' es false o null
+    }
     // whereConditions.inventariado = false;
 
     // Realizar la consulta a la base de datos
@@ -556,7 +607,7 @@ const getConsultaBienes = async (req, res) => {
     });
 
     // Devolver los bienes filtrados
-    return res.json({ data: bien });
+    return res.json( {bien} );
   } catch (error) {
     console.log(error);
     res
@@ -564,6 +615,7 @@ const getConsultaBienes = async (req, res) => {
       .json({ message: "Error fetching data", error: error.message });
   }
 };
+
 
 const getSigaToDB = async () => {
   try {
@@ -777,6 +829,10 @@ const getEstadisticasBiens = async (req, res) => {
       attributes: { exclude: ["trabajador_id"] },
       where: { inventariado: true },
     });
+    const activos = await models.bienes.count({
+      attributes: { exclude: ["trabajador_id"] },
+      where: { tipo: "activo" },
+    });
     const sobrantes = await models.bienes.count({
       attributes: { exclude: ["trabajador_id"] },
       where: { tipo: "sobrante" },
@@ -790,7 +846,9 @@ const getEstadisticasBiens = async (req, res) => {
       total,
       inventariados,
       sobrantes,
-      faltantes: total - inventariados,
+      activos,
+      faltantes: faltantes,
+      faltan: total - inventariados,
     };
 
     // Devolver la información del bien con la URL de la imagen
@@ -834,11 +892,14 @@ const generarSbnSobrante = async (req, res) => {
     if (usuario.jefe && usuario.jefe.grupo) {
       grupoPrefix = usuario.jefe.grupo.nombre === "Grupo 1" ? "G1" : "G2";
     } else if (usuario.inventariadore && usuario.inventariadore.grupo) {
-      grupoPrefix = usuario.inventariadore.grupo.nombre === "Grupo 1" ? "G1" : "G2";
+      grupoPrefix =
+        usuario.inventariadore.grupo.nombre === "Grupo 1" ? "G1" : "G2";
     }
 
     if (!grupoPrefix) {
-      return res.status(404).json({ msg: "Grupo no encontrado para el usuario" });
+      return res
+        .status(404)
+        .json({ msg: "Grupo no encontrado para el usuario" });
     }
 
     // Formatear id_sede: añadir un 0 al inicio si es menor a 10
@@ -892,9 +953,6 @@ const generarSbnSobrante = async (req, res) => {
   }
 };
 
-
-
-
 module.exports = {
   getBienesSiga,
   getBienes,
@@ -909,5 +967,6 @@ module.exports = {
   getBienesFaltantes,
   getBienesSigaSbn,
   getEstadisticasBiens,
-  generarSbnSobrante
+  generarSbnSobrante,
+  updateFaltantes
 };
