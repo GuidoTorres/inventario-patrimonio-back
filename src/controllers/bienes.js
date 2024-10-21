@@ -293,7 +293,7 @@ const postBienes = async (req, res) => {
       fs.renameSync(imagen.path, archivoImagenRuta); // Mover el archivo cargado a la ubicación definitiva
 
       // Ruta pública para acceder a la imagen
-      const urlImagen = `http://localhost:3006/uploads/${nombreImagen}`;
+      const urlImagen = `http://10.30.1.49/uploads/${nombreImagen}`;
       console.log(urlImagen);
       // Actualizar la base de datos con la nueva ruta de la imagen
       await models.bienes.update(
