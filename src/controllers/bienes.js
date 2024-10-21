@@ -6,15 +6,15 @@ const { Sequelize, Op } = require("sequelize");
 const { getDatabaseConnection } = require("./../../config/config");
 const cron = require("node-cron");
 
-cron.schedule("* * * * *", async () => {
-  console.log("Sincronizando bienes...");
-  try {
-    await getSigaToDB(); // Llama a tu función de sincronización
-    console.log("Sincronización completa.");
-  } catch (error) {
-    console.error("Error durante la sincronización:", error);
-  }
-});
+ cron.schedule("* * * * *", async () => {
+   console.log("Sincronizando bienes...");
+   try {
+     await getSigaToDB(); // Llama a tu función de sincronización
+     console.log("Sincronización completa.");
+   } catch (error) {
+     console.error("Error durante la sincronización:", error);
+   }
+ });
 
 const getBienesSiga = async (req, res) => {
   try {
@@ -109,7 +109,6 @@ const getBienes = async (req, res) => {
       });
     }
 
-    // Caso 3: El bien no ha sido inventariado, intentar obtener la imagen desde la red compartida
     const carpetaRuta = `\\\\10.30.1.22\\patrimonio\\Docpat\\1137\\2024\\Margesi\\${bien?.sbn}`;
 
     // Verificar si la carpeta existe
@@ -127,15 +126,16 @@ const getBienes = async (req, res) => {
 
       // Si se encuentra un archivo de imagen, construir la URL para acceder a la imagen
       if (archivoImagen) {
-        imageUrl = `http://10.30.1.49/api/v1/bienes/imagenes/${bien?.sbn}/${archivoImagen}`;
+        imageUrl = `http://10.30.1.49/api/v1/bienes/imagenes/${bien.sbn}/${archivoImagen}`;
       }
     }
 
     // Preparar la información del bien con la URL de la imagen si está disponible
     const info = {
       ...bien.dataValues,
-      imagen: imageUrl || null, // Devolver la URL si existe, si no, null
+      imagen: imageUrl, // Devolver la URL de la imagen si existe
     };
+
 
     // Devolver la información del bien
     return res.status(200).json({ info });
@@ -175,7 +175,6 @@ const getBienesInventariados = async (req, res) => {
       .json({ message: "Error fetching data", error: error.message });
   }
 };
-
 const getBienesFaltantes = async (req, res) => {
   try {
     const { models } = await getDatabaseConnection();
@@ -727,9 +726,6 @@ const getSigaToDB = async (req, res) => {
       .json({ message: "Error durante la sincronización", error: error.message });
   }
 };
-
-
-
 
 const getBienesSigaSbn = async (req, res) => {
   try {
