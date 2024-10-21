@@ -245,30 +245,32 @@ const getBienImagen = async (req, res) => {
     res.status(404).send("Imagen no encontrada");
   }
 };
+
+
 const postBienes = async (req, res) => {
   try {
     const { models } = await getDatabaseConnection();
+
+    // Verificar si el bien ya existe
     const bienExistente = await models.bienes.findOne({
       where: { sbn: req.body.sbn },
     });
-
+    console.log("prueba");
     let bien;
 
+    // Si el bien ya existe, actualízalo; si no, créalo
     if (bienExistente) {
-      // Si el bien ya existe, actualízalo
       await models.bienes.update(req.body, {
         where: { sbn: req.body.sbn },
       });
-      bien = bienExistente;
+      bien = { ...bienExistente.dataValues, ...req.body }; // Combinar los datos antiguos con los nuevos
     } else {
-      // Si no existe, créalo
       bien = await models.bienes.create(req.body);
     }
-
-    // Manejo de imágenes
-    if (req.files && req.files.imagen) {
-      const imagen = req.files.imagen;
-      const nombreImagen = `${req.body.sbn}.png`; // Renombrar la imagen con el SBN
+    // Manejo de imágenes si se ha subido una
+    if (req.file) { // req.file contiene toda la información del archivo
+      const imagen = req.file; 
+      const nombreImagen = `${req.body.sbn}${path.extname(imagen.originalname)}`; // Renombrar la imagen con el SBN y la extensión correcta
       const carpetaServidor = path.join(__dirname, '..', 'uploads'); // Ruta a la carpeta en el servidor
 
       // Crear la carpeta si no existe
@@ -276,47 +278,54 @@ const postBienes = async (req, res) => {
         fs.mkdirSync(carpetaServidor, { recursive: true });
       }
 
-      // Ruta completa para guardar la imagen
+      // Verificar si el bien ya tenía una imagen anterior y eliminarla
+      if (bienExistente && bienExistente.foto) {
+        const rutaImagenAnterior = path.join(__dirname, '..', 'uploads', path.basename(bienExistente.foto));
+        if (fs.existsSync(rutaImagenAnterior)) {
+          fs.unlinkSync(rutaImagenAnterior); // Eliminar la imagen anterior
+        }
+      }
+
+      // Ruta completa para guardar la nueva imagen
       const archivoImagenRuta = path.join(carpetaServidor, nombreImagen);
 
-      // Guardar la nueva imagen en el servidor
-      imagen.mv(archivoImagenRuta, (err) => {
-        if (err) {
-          return res.status(500).json({ message: "Error al guardar la imagen", error: err.message });
-        }
-      });
+      // Renombrar la imagen cargada para moverla a la nueva ubicación
+      fs.renameSync(imagen.path, archivoImagenRuta); // Mover el archivo cargado a la ubicación definitiva
 
       // Ruta pública para acceder a la imagen
       const urlImagen = `http://localhost:3006/uploads/${nombreImagen}`;
-
-      // Actualizar la base de datos con la ruta de la imagen
+      console.log(urlImagen);
+      // Actualizar la base de datos con la nueva ruta de la imagen
       await models.bienes.update(
         { foto: urlImagen }, // Asumiendo que tienes un campo para la ruta de la imagen
         { where: { sbn: req.body.sbn } }
       );
+
+      // Actualizar el objeto del bien con la nueva imagen en la respuesta
+      bien.foto = urlImagen;
     }
 
+    // Emitir cambios si es necesario
     const io = req.app.locals.io;
-
-    // Obtener el número actualizado de bienes inventariados
     const count = await models.bienes.count({
-      where: {
-        inventariado: true,
-      },
+      where: { inventariado: true },
     });
-
-    // Emitir el bien actualizado y el nuevo conteo de bienes a través de Socket.IO
     io.emit("bien-actualizado", {
       bien: req.body,
-      count: count, // Enviar el nuevo conteo
+      count: count,
     });
 
-    return res.json({ msg: bienExistente ? "Bien actualizado con éxito!" : "Bien creado con éxito!" });
+    return res.json({
+      msg: bienExistente ? "Bien actualizado con éxito!" : "Bien creado con éxito!",
+      bien: bien, // Asegurarse de que 'bien' contenga la nueva foto
+    });
   } catch (error) {
     console.log(error);
-    res.status(500).json({ message: "Error fetching data", error: error.message });
+    return res.status(500).json({ message: "Error al procesar el bien", error: error.message });
   }
 };
+
+
 
 
 const sedesPorTrabajador = async (req, res) => {

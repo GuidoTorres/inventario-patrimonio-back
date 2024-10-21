@@ -5,6 +5,7 @@ const http = require("http");
 const socketIo = require("socket.io");
 const routerApi = require("./src/routes");
 const { initializeDatabase } = require("./config/config");
+const path = require("path");
 
 const app = express();
 const server = http.createServer(app);
@@ -12,6 +13,7 @@ const io = socketIo(server);
 
 app.use(express.json());
 app.use(cors());
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.get("/", (req, res) => {
   res.send("VISITA LA RUTA api-docs and github");

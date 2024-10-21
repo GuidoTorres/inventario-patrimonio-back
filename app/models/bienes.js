@@ -29,7 +29,9 @@ module.exports = (sequelize, DataTypes) => {
       detalles: DataTypes.STRING,
       usuario_id: DataTypes.INTEGER,
       tipo: DataTypes.STRING,
-      secuencia: DataTypes.INTEGER
+      secuencia: DataTypes.INTEGER,
+      observacion: DataTypes.STRING,
+      lastSync: DataTypes.DATE
     },
     { timestamps: true, tableName: "bienes", freezeTableName: true }
   );
