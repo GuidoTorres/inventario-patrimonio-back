@@ -21,7 +21,7 @@ const getDependenciasSiga = async (req, res) => {
     const { models } = await getDatabaseConnection();
 
     // Hacer fetch a la API externa
-    let url = "http://10.30.1.49/api/v1/bienes/marcas";
+    let url = "http://localhost:3001/api/v1/bienes/marcas";
     const response = await fetch(url);
     const externalData = await response.json();
 
@@ -50,6 +50,8 @@ const getDependenciasSiga = async (req, res) => {
     await models.ubicaciones.bulkCreate(ubicaciones, {
       ignoreDuplicates: true, // Evita duplicados en caso de que ya existan
     });
+
+
 
     return res.json({
       message: "Sincronización completa",

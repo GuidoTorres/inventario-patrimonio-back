@@ -1,13 +1,21 @@
-const {getDatabaseConnection} = require("./../../config/config");
+const { getDatabaseConnection } = require("./../../config/config");
 const { encrypt } = require("../helpers/handleBcrypt");
 const dayjs = require("dayjs");
+const { Op } = require("sequelize");
 
 const getUsuario = async (req, res, next) => {
   try {
-    const {models} = await getDatabaseConnection(); 
+    const { models } = await getDatabaseConnection();
 
     const all = await models.usuarios.findAll({
-      include: [{ model: models.roles }],
+      include: [
+        {
+          model: models.roles,
+          where: {
+            nombre: { [Op.ne]: "Administrador" },
+          },
+        },
+      ],
     });
     const format = all.map((item, i) => {
       return {
@@ -23,7 +31,7 @@ const getUsuario = async (req, res, next) => {
 };
 
 const postUsuario = async (req, res, next) => {
-  const {models} = await getDatabaseConnection(); 
+  const { models } = await getDatabaseConnection();
 
   const { nombre_usuario, contrasenia, jefe_id, inventariador_id, rol_id } =
     req.body;
@@ -67,7 +75,7 @@ const postUsuario = async (req, res, next) => {
 };
 
 const updateUsuario = async (req, res, next) => {
-  const {models} = await getDatabaseConnection(); 
+  const { models } = await getDatabaseConnection();
 
   let id = req.params.id;
   const { nombre_usuario, contrasenia, jefe_id, inventariador_id, rol_id } =
@@ -90,7 +98,7 @@ const updateUsuario = async (req, res, next) => {
 };
 
 const deleteUsuario = async (req, res, next) => {
-  const {models} = await getDatabaseConnection(); 
+  const { models } = await getDatabaseConnection();
 
   let id = req.params.id;
   try {

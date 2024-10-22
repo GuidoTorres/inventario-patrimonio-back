@@ -181,15 +181,15 @@ const getBienesFaltantes = async (req, res) => {
     const { models } = await getDatabaseConnection();
 
     const bien = await models.bienes.findAll({
-      attributes: { exclude: ["trabajador_id"] },
+      attributes:["sbn", "descripcion", "marca", "modelo","color", "serie", "situacion", "observacion", "detalles"],
       where: {
         inventariado: { [Op.not]: true },
       },
       include: [
-        { model: models.sedes },
-        { model: models.dependencias },
-        { model: models.ubicaciones },
-        { model: models.trabajadores },
+        { model: models.sedes, attributes:["nombre"]},
+        { model: models.dependencias,attributes:["nombre"] },
+        { model: models.ubicaciones, attributes:["tipo_ubicac", "ubicac_fisica"]},
+        { model: models.trabajadores,attributes:["nombre", "dni"] },
       ],
     });
 
@@ -635,7 +635,7 @@ const getSigaToDB = async (req, res) => {
     );
 
     // Hacer fetch a la API externa
-    let url = "http://10.30.1.49/api/v1/bienes/prueba";
+    let url = "http://localhost:3001/api/v1/bienes/prueba";
     const response = await fetch(url);
 
     if (!response.ok) {
@@ -719,7 +719,7 @@ const getSigaToDB = async (req, res) => {
       "Sincronización completa. Nuevos bienes insertados:",
       format.length
     );
-    return res.json({ message: "Sincronización completada", format });
+    return res.json({ message: "Sincronización completada" });
   } catch (error) {
     console.log(error);
     return res
@@ -727,9 +727,6 @@ const getSigaToDB = async (req, res) => {
       .json({ message: "Error durante la sincronización", error: error.message });
   }
 };
-
-
-
 
 const getBienesSigaSbn = async (req, res) => {
   try {

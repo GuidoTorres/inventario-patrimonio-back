@@ -10,6 +10,10 @@ const authLogin = async (req, res, next) => {
       where: { nombre_usuario: usuario },
       include: [
         {
+          model: models.permisos,
+          attributes: ["nombre"],
+        },
+        {
           model: models.inventariadores,
           attributes: [],
           include: { model: models.grupos },
