@@ -41,11 +41,16 @@ const getBienesSiga = async (req, res) => {
     }
 
     const externalData = await response.json();
+    console.log("prueba");
+    
+    // // Guardar los datos en tu base de datos local
+    // await models.bienes.bulkCreate(externalData.data, {
+    //   updateOnDuplicate: true,
+    // });
 
-    // Guardar los datos en tu base de datos local
-    await models.bienes.bulkCreate(externalData.data, {
-      updateOnDuplicate: true,
-    });
+
+    
+
 
     // Devolver la respuesta
     return res.json(externalData);
@@ -609,8 +614,10 @@ const getConsultaBienes = async (req, res) => {
       where: whereConditions,
     });
 
+
+
     // Devolver los bienes filtrados
-    return res.json({ bien });
+    return res.json({ data:bien });
   } catch (error) {
     console.log(error);
     res
