@@ -22,7 +22,7 @@ const getBienesSiga = async (req, res) => {
     const { sede_id, ubicacion_id, dni, sbn, serie } = req.query;
 
     // Construir la URL con los parámetros recibidos
-    let url = "http://10.30.1.42:8084/api/v1/bienes?";
+    let url = "http://localhost:3001/api/v1/bienes?";
     const queryParams = new URLSearchParams();
 
     if (sede_id) queryParams.append("sede_id", sede_id);
@@ -42,7 +42,10 @@ const getBienesSiga = async (req, res) => {
 
     const externalData = await response.json();
     console.log("prueba");
-    
+    if(externalData.data.length=== 0){
+      return res.status(400).json({msg:"Bien no encontrado"});
+
+    }
     // // Guardar los datos en tu base de datos local
     // await models.bienes.bulkCreate(externalData.data, {
     //   updateOnDuplicate: true,
@@ -871,7 +874,7 @@ const getEstadisticasBiens = async (req, res) => {
 
     const info = {
       total,
-      inventariados,
+      inventariados: activos + sobrantes,
       sobrantes,
       activos,
       faltantes: faltantes,

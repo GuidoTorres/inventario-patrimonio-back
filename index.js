@@ -9,17 +9,32 @@ const path = require("path");
 
 const app = express();
 const server = http.createServer(app);
-const io = socketIo(server);
+
+// Configuración de CORS para Socket.IO
+const io = socketIo(server, {
+  cors: {
+    origin: 'http://localhost:3000',  // Permitir acceso desde el frontend
+    methods: ['GET', 'POST'],
+    credentials: true
+  }
+});
 
 app.use(express.json());
-app.use(cors());
+
+// Configuración de CORS para Express (Permitir solicitudes del frontend)
+app.use(cors({
+  origin: 'http://localhost:3000',  // Solo permitir solicitudes desde esta URL
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  credentials: true
+}));
+
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.get("/", (req, res) => {
   res.send("VISITA LA RUTA api-docs and github");
 });
 
-// Guardamos la instancia de Socket.IO en app.locals
+// Guardamos la instancia de Socket.IO en app.locals para usarla en otras partes de la app
 app.locals.io = io;
 
 routerApi(app);
