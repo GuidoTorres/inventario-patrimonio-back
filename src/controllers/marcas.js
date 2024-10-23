@@ -6,7 +6,7 @@ const getMarcas = async (req, res) => {
   try {
     const { models } = await getDatabaseConnection(); // Asegúrate de tener la conexión configurada
 
-    const data = await models.colores.findAll()
+    const data = await models.marcas.findAll()
 
     return res.json( {data:data} );
 
