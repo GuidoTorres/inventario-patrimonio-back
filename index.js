@@ -10,10 +10,20 @@ const path = require("path");
 const app = express();
 const server = http.createServer(app);
 
+// Orígenes permitidos
+const allowedOrigins = ['http://localhost:3000', 'http://10.30.1.49'];
+
 // Configuración de CORS para Socket.IO
 const io = socketIo(server, {
   cors: {
-    origin: 'http://localhost:3000',  // Permitir acceso desde el frontend
+    origin: function (origin, callback) {
+      // Permitir los mismos orígenes que en Express
+      if (allowedOrigins.indexOf(origin) !== -1 || !origin) {
+        callback(null, true);
+      } else {
+        callback(new Error('Origen no permitido por CORS'));
+      }
+    },
     methods: ['GET', 'POST'],
     credentials: true
   }
@@ -21,9 +31,15 @@ const io = socketIo(server, {
 
 app.use(express.json());
 
-// Configuración de CORS para Express (Permitir solicitudes del frontend)
+// Configuración de CORS para Express (Permitir solicitudes desde los orígenes permitidos)
 app.use(cors({
-  origin: 'http://localhost:3000',  // Solo permitir solicitudes desde esta URL
+  origin: function (origin, callback) {
+    if (allowedOrigins.indexOf(origin) !== -1 || !origin) {
+      callback(null, true);
+    } else {
+      callback(new Error('Origen no permitido por CORS'));
+    }
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true
 }));
