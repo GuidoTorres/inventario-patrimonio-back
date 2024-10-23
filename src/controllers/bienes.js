@@ -22,7 +22,7 @@ const getBienesSiga = async (req, res) => {
     const { sede_id, ubicacion_id, dni, sbn, serie } = req.query;
 
     // Construir la URL con los parámetros recibidos
-    let url = "http://localhost:3001/api/v1/bienes?";
+    let url = "http://10.30.1.42:8084/api/v1/bienes?";
     const queryParams = new URLSearchParams();
 
     if (sede_id) queryParams.append("sede_id", sede_id);
@@ -644,7 +644,7 @@ const getSigaToDB = async (req, res) => {
     );
 
     // Hacer fetch a la API externa
-    let url = "http://localhost:3001/api/v1/bienes/prueba";
+    let url = "http://10.30.1.42:8084/api/v1/bienes/prueba";
     const response = await fetch(url);
 
     if (!response.ok) {
