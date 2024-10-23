@@ -32,17 +32,7 @@ const io = socketIo(server, {
 app.use(express.json());
 
 // Configuración de CORS para Express (Permitir solicitudes desde los orígenes permitidos)
-app.use(cors({
-  origin: function (origin, callback) {
-    if (allowedOrigins.indexOf(origin) !== -1 || !origin) {
-      callback(null, true);
-    } else {
-      callback(new Error('Origen no permitido por CORS'));
-    }
-  },
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  credentials: true
-}));
+app.use(cors());
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
