@@ -2,7 +2,7 @@ const fetch = (...args) =>
   import("node-fetch").then(({ default: fetch }) => fetch(...args));
 const fs = require("fs");
 const path = require("path");
-const { Sequelize, Op } = require("sequelize");
+const { Sequelize, Op, where } = require("sequelize");
 const { getDatabaseConnection } = require("./../../config/config");
 const cron = require("node-cron");
 const XLSX = require('xlsx');
@@ -160,7 +160,7 @@ const getBienes = async (req, res) => {
 const getBienesInventariados = async (req, res) => {
   try {
     const { models } = await getDatabaseConnection();
-
+    const { usuario_id } = req.params
     const bien = await models.bienes.findAll({
       attributes: { exclude: ["trabajador_id"] },
       where: {
@@ -171,6 +171,7 @@ const getBienesInventariados = async (req, res) => {
         { model: models.dependencias },
         { model: models.ubicaciones },
         { model: models.trabajadores },
+        { model: models.usuarios, where: { id: usuario_id } }
       ],
       order: [["updatedAt", "DESC"]],
     });
@@ -1047,7 +1048,7 @@ const actualizarBienesPorSBN = async (req, res) => {
     await models.bienes23.bulkCreate(format, {
       ignoreDuplicates: true // Omitir registros que ya existen
     });
-        fs.unlinkSync(rutaArchivo);
+    fs.unlinkSync(rutaArchivo);
 
     // Responder con los registros nuevos que se van a insertar
     res.status(200).json({

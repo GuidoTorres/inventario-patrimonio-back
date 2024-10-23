@@ -28,7 +28,7 @@ async function initializeDatabase() {
     const localMySQLDB = new Sequelize(
       "inventario_patrimonio",
       "root",
-      "Tupapi00",
+      "root",
       {
         host: "localhost",
         dialect: "mysql",
