@@ -6,12 +6,10 @@ const getMarcas = async (req, res) => {
   try {
     const { models } = await getDatabaseConnection(); // Asegúrate de tener la conexión configurada
 
-    // Hacer fetch a la API externa
-    let url = "http://10.30.1.42:8084/api/v1/marcas";
-    const response = await fetch(url);
-    const externalData = await response.json();
-//prueba
-    return res.json(externalData );
+    const data = await models.colores.findAll()
+
+    return res.json( {data:data} );
+
   } catch (error) {
     console.log(error);
     res
