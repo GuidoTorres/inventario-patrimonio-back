@@ -5,16 +5,17 @@ const path = require("path");
 const { Sequelize, Op } = require("sequelize");
 const { getDatabaseConnection } = require("./../../config/config");
 const cron = require("node-cron");
+const XLSX = require('xlsx');
 
- cron.schedule("* * * * *", async () => {
-   console.log("Sincronizando bienes...");
-   try {
-     await getSigaToDB(); // Llama a tu función de sincronización
-     console.log("Sincronización completa.");
-   } catch (error) {
-     console.error("Error durante la sincronización:", error);
-   }
- });
+cron.schedule("* * * * *", async () => {
+  console.log("Sincronizando bienes...");
+  try {
+    await getSigaToDB(); // Llama a tu función de sincronización
+    console.log("Sincronización completa.");
+  } catch (error) {
+    console.error("Error durante la sincronización:", error);
+  }
+});
 
 const getBienesSiga = async (req, res) => {
   try {
@@ -42,8 +43,8 @@ const getBienesSiga = async (req, res) => {
 
     const externalData = await response.json();
     console.log("prueba");
-    if(externalData.data.length=== 0){
-      return res.status(400).json({msg:"Bien no encontrado"});
+    if (externalData.data.length === 0) {
+      return res.status(400).json({ msg: "Bien no encontrado" });
 
     }
     // // Guardar los datos en tu base de datos local
@@ -52,7 +53,7 @@ const getBienesSiga = async (req, res) => {
     // });
 
 
-    
+
 
 
     // Devolver la respuesta
@@ -188,15 +189,15 @@ const getBienesFaltantes = async (req, res) => {
     const { models } = await getDatabaseConnection();
 
     const bien = await models.bienes.findAll({
-      attributes:["sbn", "descripcion", "marca", "modelo","color", "serie", "situacion", "observacion", "detalles"],
+      attributes: ["sbn", "descripcion", "marca", "modelo", "color", "serie", "situacion", "observacion", "detalles"],
       where: {
         inventariado: { [Op.not]: true },
       },
       include: [
-        { model: models.sedes, attributes:["nombre"]},
-        { model: models.dependencias,attributes:["nombre"] },
-        { model: models.ubicaciones, attributes:["tipo_ubicac", "ubicac_fisica"]},
-        { model: models.trabajadores,attributes:["nombre", "dni"] },
+        { model: models.sedes, attributes: ["nombre"] },
+        { model: models.dependencias, attributes: ["nombre"] },
+        { model: models.ubicaciones, attributes: ["tipo_ubicac", "ubicac_fisica"] },
+        { model: models.trabajadores, attributes: ["nombre", "dni"] },
       ],
     });
 
@@ -556,6 +557,7 @@ const bienesPorTrabajador = async (req, res) => {
           attributes: ["nombre"],
         },
       ],
+      order: [["updatedAt", "DESC"]],
     });
 
     // Si no se encuentran bienes, devolver un mensaje
@@ -620,7 +622,7 @@ const getConsultaBienes = async (req, res) => {
 
 
     // Devolver los bienes filtrados
-    return res.json({ data:bien });
+    return res.json({ data: bien });
   } catch (error) {
     console.log(error);
     res
@@ -685,10 +687,10 @@ const getSigaToDB = async (req, res) => {
           (dep) => Number(dep.tipo_ubicac) === Number(item.TIPO_UBICAC)
         )?.id;
       }
-      
+
       if (item.COD_UBICAC == "0") {
         ubicacionId = ubicaciones.find(
-          
+
           (ubi) =>
             Number(ubi.tipo_ubicac) === Number(item.TIPO_UBICAC) &&
             Number(ubi.ubicac_fisica) === Number(item.COD_UBICAC)
@@ -983,6 +985,83 @@ const generarSbnSobrante = async (req, res) => {
   }
 };
 
+const actualizarBienesPorSBN = async (req, res) => {
+  try {
+    // Verificar que se haya cargado un archivo
+    if (!req.file) {
+      return res.status(400).send('No se ha cargado ningún archivo.');
+    }
+
+    // Ruta al archivo cargado
+    const rutaArchivo = req.file.path;
+
+    // Leer el archivo Excel
+    const workbook = XLSX.readFile(rutaArchivo);
+    const nombreHoja = workbook.SheetNames[0];
+    const hoja = workbook.Sheets[nombreHoja];
+    const registrosExcel = XLSX.utils.sheet_to_json(hoja);
+
+    // Extraer los 'sbn' del Excel y convertir a string, eliminar espacios y normalizar a minúsculas
+    const sbnExcel = registrosExcel.map((registro) => String(registro.cod_barra).trim().toLowerCase());
+
+    const { models } = await getDatabaseConnection();
+
+    // Buscar en la base de datos los 'sbn' que están en el Excel
+    const bienesEncontradosEnBD = await models.bienes23.findAll({
+      where: {
+        sbn: {
+          [Op.in]: sbnExcel, // Buscar los valores de 'sbn' que están en la base de datos
+        },
+      },
+      attributes: ['sbn'], // Solo seleccionar el campo 'sbn'
+    });
+
+    // Convertir a string y normalizar los SBN encontrados en la BD
+    const sbnEnBD = bienesEncontradosEnBD.map((bien) => String(bien.sbn).trim().toLowerCase());
+
+    // Imprimir los SBN de la base de datos y del Excel para depuración
+    console.log('SBNs en Excel (normalizados):', sbnExcel);
+    console.log('SBNs en BD (normalizados):', sbnEnBD);
+
+    // Filtrar los 'sbn' del Excel que NO están en la base de datos
+    const sbnNoEnBD = sbnExcel.filter((sbn) => !sbnEnBD.includes(sbn));
+
+
+    // Obtener los registros completos desde el Excel que no están en la BD
+    const registrosNuevos = registrosExcel.filter((registro) =>
+      sbnNoEnBD.includes(String(registro.cod_barra).trim().toLowerCase())
+    );
+
+    // Formatear los registros nuevos que se van a insertar o mostrar
+    const format = registrosNuevos.map(item => {
+      return {
+
+        SBN: item?.cod_barra,
+        descripcion: item?.descripcion,
+        modelo: item?.modelo,
+        marca: item?.marca,
+        serie: item?.serie
+      }
+    });
+
+    await models.bienes23.bulkCreate(format, {
+      ignoreDuplicates: true // Omitir registros que ya existen
+    });
+        fs.unlinkSync(rutaArchivo);
+
+    // Responder con los registros nuevos que se van a insertar
+    res.status(200).json({
+      message: 'Procesado correctamente',
+      registrosNuevos: format,
+    });
+  } catch (error) {
+    console.error('Error al procesar el archivo Excel:', error);
+    res.status(500).send('Error al procesar el archivo Excel.');
+  }
+};
+
+
+
 module.exports = {
   getBienesSiga,
   getBienes,
@@ -999,4 +1078,5 @@ module.exports = {
   getEstadisticasBiens,
   generarSbnSobrante,
   updateFaltantes,
+  actualizarBienesPorSBN
 };
