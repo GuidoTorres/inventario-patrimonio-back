@@ -173,8 +173,6 @@ const getBienesInventariados = async (req, res) => {
       ],
       order: [["updatedAt", "DESC"]],
     });
-
-    // Devolver la información del bien con la URL de la imagen
     return res.json({ bien });
   } catch (error) {
     console.log(error);
@@ -983,7 +981,6 @@ const generarSbnSobrante = async (req, res) => {
   }
 };
 
-
 const actualizarBienesPorSBN = async (req, res) => {
   try {
     // Verificar que se haya cargado un archivo
@@ -1059,6 +1056,26 @@ const actualizarBienesPorSBN = async (req, res) => {
   }
 };
 
+const deleteBienes = async (req, res) => {
+  const { models } = await getDatabaseConnection();
+
+  try {
+
+    const { id } = req.query
+
+    await models.bienes.update({ inventariado: false }, { where: { id: id } })
+
+    return res.status(200).json({ msg: "Bien eliminado correctamente!" });
+  } catch (error) {
+    res
+      .status(500)
+      .json({ message: "No se pudo eliminar el bien!" });
+  }
+
+
+
+}
+
 
 
 module.exports = {
@@ -1077,5 +1094,6 @@ module.exports = {
   getEstadisticasBiens,
   generarSbnSobrante,
   updateFaltantes,
-  actualizarBienesPorSBN
+  actualizarBienesPorSBN,
+  deleteBienes
 };
