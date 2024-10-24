@@ -42,7 +42,6 @@ const getBienesSiga = async (req, res) => {
     }
 
     const externalData = await response.json();
-    console.log("prueba");
     if (externalData.data.length === 0) {
       return res.status(400).json({ msg: "Bien no encontrado" });
 
@@ -155,12 +154,11 @@ const getBienes = async (req, res) => {
       .json({ message: "Error fetching data", error: error.message });
   }
 };
-
-
 const getBienesInventariados = async (req, res) => {
   try {
     const { models } = await getDatabaseConnection();
-    const { usuario_id } = req.params
+    const { usuario_id } = req.query
+    console.log(usuario_id);
     const bien = await models.bienes.findAll({
       attributes: { exclude: ["trabajador_id"] },
       where: {
@@ -244,7 +242,6 @@ const getBienesPorInventariador = async (req, res) => {
     });
   }
 };
-
 const getBienImagen = async (req, res) => {
   const { sbn, filename } = req.params;
 
@@ -259,7 +256,6 @@ const getBienImagen = async (req, res) => {
     res.status(404).send("Imagen no encontrada");
   }
 };
-
 const postBienes = async (req, res) => {
   try {
     const { models } = await getDatabaseConnection();
@@ -348,7 +344,6 @@ const postBienes = async (req, res) => {
       .json({ message: "Error al procesar el bien", error: error.message });
   }
 };
-
 const updateFaltantes = async (req, res) => {
   try {
     const { models } = await getDatabaseConnection();
@@ -378,7 +373,6 @@ const updateFaltantes = async (req, res) => {
       .json({ msg: "Error al procesar los faltantes", error: error.message });
   }
 };
-
 const sedesPorTrabajador = async (req, res) => {
   try {
     const { models } = await getDatabaseConnection();
@@ -923,10 +917,13 @@ const generarSbnSobrante = async (req, res) => {
     let grupoPrefix = null;
 
     if (usuario.jefe && usuario.jefe.grupo) {
-      grupoPrefix = usuario.jefe.grupo.nombre === "Grupo 1" ? "G1" : "G2";
+      // Usar trim() para eliminar posibles espacios y === para comparación estricta
+      const grupoNombre = usuario.jefe.grupo.id;
+      grupoPrefix = grupoNombre === 1 ? "G1" : "G2";
     } else if (usuario.inventariadore && usuario.inventariadore.grupo) {
-      grupoPrefix =
-        usuario.inventariadore.grupo.nombre === "Grupo 1" ? "G1" : "G2";
+      // Usar trim() para eliminar posibles espacios y === para comparación estricta
+      const grupoNombre = usuario.inventariadore.grupo.id;
+      grupoPrefix = grupoNombre === 1 ? "G1" : "G2";
     }
 
     if (!grupoPrefix) {
@@ -942,7 +939,7 @@ const generarSbnSobrante = async (req, res) => {
     const ultimoBien = await models.bienes.findOne({
       where: {
         sbn: {
-          [Op.like]: `${grupoPrefix}${id_usuario}${sedeFormateada}${id_ubicacion}%`, // Buscar SBN con el mismo patrón
+          [Op.like]: `${grupoPrefix}%`, // Buscar SBN con el mismo patrón
         },
       },
       order: [["sbn", "DESC"]], // Ordenar para encontrar el último SBN
@@ -985,6 +982,7 @@ const generarSbnSobrante = async (req, res) => {
     return res.status(500).json({ msg: "Error generando el SBN", error });
   }
 };
+
 
 const actualizarBienesPorSBN = async (req, res) => {
   try {
