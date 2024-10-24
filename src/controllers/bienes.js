@@ -1060,9 +1060,7 @@ const deleteBienes = async (req, res) => {
   const { models } = await getDatabaseConnection();
 
   try {
-
     const { id } = req.query
-
     await models.bienes.update({ inventariado: false }, { where: { id: id } })
 
     return res.status(200).json({ msg: "Bien eliminado correctamente!" });
