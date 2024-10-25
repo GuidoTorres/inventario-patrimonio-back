@@ -51,10 +51,6 @@ const getBienesSiga = async (req, res) => {
     //   updateOnDuplicate: true,
     // });
 
-
-
-
-
     // Devolver la respuesta
     return res.json(externalData);
   } catch (error) {
@@ -627,7 +623,8 @@ const getConsultaBienes = async (req, res) => {
 const getSigaToDB = async (req, res) => {
   try {
     const { models } = await getDatabaseConnection(); // Asegúrate de tener la conexión configurada
-
+    console.log("prueba");
+    
     // Obtener las secuencias de todos los bienes ya existentes en la base de datos
     const bienesExistentes = await models.bienes.findAll({
       attributes: ["secuencia"],
