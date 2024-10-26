@@ -1,5 +1,4 @@
-const fetch = (...args) =>
-  import("node-fetch").then(({ default: fetch }) => fetch(...args));
+const fetch = require("node-fetch");
 const fs = require("fs");
 const path = require("path");
 const { Sequelize, Op, where } = require("sequelize");
@@ -7,7 +6,7 @@ const { getDatabaseConnection } = require("./../../config/config");
 const cron = require("node-cron");
 const XLSX = require('xlsx');
 
-cron.schedule("* * * * *", async () => {
+cron.schedule("0 */5 * * *", async () => {
   console.log("Sincronizando bienes...");
   try {
     await getSigaToDB(); // Llama a tu función de sincronización
@@ -86,8 +85,8 @@ const getBienes = async (req, res) => {
       });
 
       const format = {
-        sbn: bien23.SBN,
-        descripcion: bien23.descripcion,
+        sbn: bien23?.SBN,
+        descripcion: bien23?.descripcion,
         tipo: "sobrante",
       };
 

@@ -15,6 +15,7 @@ const ubicaciones = require("./ubicaciones");
 const Bienes23Model = require("./bienes23");
 const ColoresModel = require("./colores");
 const MarcasModel = require("./marcas");
+const SigaModel = require("./siga")
 
 function initModels(sequelize) {
   const Bienes = BienModel(sequelize, Sequelize);
@@ -32,6 +33,7 @@ function initModels(sequelize) {
   const Bienes23 = Bienes23Model(sequelize, Sequelize);
   const Marcas = MarcasModel(sequelize, Sequelize);
   const Colores = ColoresModel(sequelize, Sequelize);
+  const Siga = SigaModel(sequelize, Sequelize);
 
   Sedes.hasMany(Dependencias, { foreignKey: "sede_id" });
   Dependencias.belongsTo(Sedes, { foreignKey: "sede_id" });
@@ -89,6 +91,7 @@ function initModels(sequelize) {
     Bienes23,
     Colores,
     Marcas,
+    Siga
   };
 }
 

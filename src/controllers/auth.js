@@ -31,7 +31,6 @@ const authLogin = async (req, res, next) => {
         .status(404)
         .send({ msg: "Usuario no encontrado!", status: 404 });
     }
-    console.log(get);
     const checkPassword = await compare(
       contrasenia,
       get.dataValues.contrasenia
