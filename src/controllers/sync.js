@@ -61,7 +61,6 @@ async function verifyDatabaseConnections() {
   let remoteDB = null;
   
   try {
-    // Primero conectar a local (como está actualmente)
     console.log("Verifying local database connection...");
     localDB = getLocalDatabaseConnection();
     await localDB.authenticate();
@@ -74,25 +73,18 @@ async function verifyDatabaseConnections() {
       connectionId: localInfo.connection_id,
       host: "localhost"
     });
-
-    if (localDB.config.host !== 'localhost') {
-      throw new Error("Local connection is not pointing to localhost");
-    }
-
   } catch (error) {
     console.error("Local database connection failed:", error);
     throw new Error("Cannot proceed without local database connection");
   }
 
   try {
-    // Usar getRemoteDatabaseConnection en lugar de la creación directa
     console.log("\nVerifying remote database connection...");
     remoteDB = await getRemoteDatabaseConnection();
-    
     if (!remoteDB) {
-      throw new Error("Could not establish remote database connection");
+      throw new Error("Could not establish remote connection");
     }
-
+    
     const [[remoteInfo]] = await remoteDB.query('SELECT @@hostname as hostname, DATABASE() as database_name, CONNECTION_ID() as connection_id');
     console.log("Remote database info:", {
       hostname: remoteInfo.hostname,
@@ -100,10 +92,6 @@ async function verifyDatabaseConnections() {
       connectionId: remoteInfo.connection_id,
       host: "10.30.1.43"
     });
-
-    if (localInfo.hostname === remoteInfo.hostname && localInfo.connectionId === remoteInfo.connectionId) {
-      throw new Error("Local and remote connections are pointing to the same database");
-    }
 
     return { localDB, remoteDB };
   } catch (error) {
@@ -453,12 +441,15 @@ async function syncDatabases() {
 
     await syncReferenceTables(remoteDB, localDB)
   }
+
+    // Then handle updates
     console.log('\nSyncing local changes to remote...');
     await syncLocalToRemote(localDB, remoteDB);
 
     console.log('\nSyncing remote changes to local...');
     await syncRemoteToLocal(localDB, remoteDB);
 
+    // Final verification
     const [[{ count: finalLocalCount }]] = await localDB.query('SELECT COUNT(*) as count FROM bienes');
     const [[{ count: finalRemoteCount }]] = await remoteDB.query('SELECT COUNT(*) as count FROM bienes');
     
