@@ -46,33 +46,65 @@ function logConnectionStatus(message) {
   console.log(`[${timestamp}] [DB:${connectionType}] ${message}`);
 }
 
+async function checkTcpConnection(host, port = 3306) {
+  return new Promise((resolve) => {
+    const net = require('net');
+    const socket = new net.Socket();
+    
+    socket.setTimeout(2000);  // 2 segundos timeout
+
+    socket.on('connect', () => {
+      console.log(`TCP connection successful to ${host}:${port}`);
+      socket.destroy();
+      resolve(true);
+    });
+
+    socket.on('timeout', () => {
+      console.log(`TCP connection timeout to ${host}:${port}`);
+      socket.destroy();
+      resolve(false);
+    });
+
+    socket.on('error', (err) => {
+      console.log(`TCP connection error to ${host}:${port}:`, err.message);
+      resolve(false);
+    });
+
+    console.log(`Attempting TCP connection to ${host}:${port}...`);
+    socket.connect(port, host);
+  });
+}
+
 async function checkServerConnection(ipAddress) {
   try {
     console.log(`Attempting to ping ${ipAddress}...`);
-    const response = await ping.promise.probe(ipAddress, {
-      timeout: 2,
-      extra: ['-c', '1']
-    });
+    const pingOptions = process.platform === 'win32' ? 
+      { timeout: 2, extra: ['-n', '1'] } :  // Windows options
+      { timeout: 2, extra: ['-c', '1'] };   // Unix/Mac options
+
+    const response = await ping.promise.probe(ipAddress, pingOptions);
     console.log('Ping response:', {
       alive: response.alive,
       output: response.output,
       time: response.time
     });
+
+    // Si el ping falla, intentar conexión TCP directa
+    if (!response.alive) {
+      console.log('Ping failed, trying direct TCP connection...');
+      const isReachable = await checkTcpConnection(ipAddress);
+      return isReachable;
+    }
+
     return response.alive;
   } catch (error) {
-    console.error('Ping error:', error);
-    return false;
+    console.error('Connection check error:', error);
+    // Intentar conexión TCP como respaldo
+    return await checkTcpConnection(ipAddress);
   }
 }
 
 async function createConnection(config) {
-  console.log('Attempting database connection with config:', {
-    host: config.host,
-    user: config.username,
-    database: config.database,
-    port: 3306  // MySQL default port
-  });
-
   try {
     const sequelize = new Sequelize(
       config.database,
@@ -81,30 +113,26 @@ async function createConnection(config) {
       {
         host: config.host,
         dialect: config.dialect,
-        logging: true,  // Activar logging para ver queries
+        logging: config.logging,
         pool: config.pool,
         dialectOptions: {
-          connectTimeout: 30000,  // 30 segundos
-          // Opciones específicas para Windows
+          connectTimeout: 30000,
           supportBigNumbers: true,
-          bigNumberStrings: true
+          bigNumberStrings: true,
+          charset: 'utf8mb4',
+          collate: 'utf8mb4_unicode_ci'
         }
       }
     );
 
-    console.log('Testing connection...');
     await sequelize.authenticate();
-    console.log('Connection successful');
-    
     initModels(sequelize);
     return sequelize;
   } catch (error) {
-    console.error('Connection error details:', {
-      name: error.name,
+    console.error('Database connection error:', {
       message: error.message,
       code: error.original?.code,
       errno: error.original?.errno,
-      sqlState: error.original?.sqlState,
       sqlMessage: error.original?.sqlMessage
     });
     throw error;
@@ -112,29 +140,24 @@ async function createConnection(config) {
 }
 
 async function switchConnection(useRemote) {
-  // Always try remote first if server is available
-  if (useRemote && !isUsingRemoteDB) {
-    logConnectionStatus('Attempting to switch to remote database');
-  } else if (useRemote === isUsingRemoteDB && db) {
-    return; // Only return if we're already on remote
+  if (useRemote === isUsingRemoteDB && db) {
+    return;
   }
 
   const config = useRemote ? dbConfigs.remote : dbConfigs.local;
   logConnectionStatus(`Attempting to connect to ${config.host}`);
 
   try {
-    const newConnection = await createConnection(config);
-    
     if (db) {
       logConnectionStatus('Closing existing connection');
       await db.close().catch(() => {});
     }
 
+    const newConnection = await createConnection(config);
     db = newConnection;
     isUsingRemoteDB = useRemote;
     logConnectionStatus(`Successfully connected to ${config.host}`);
     
-    // If we're on local, schedule immediate check for remote availability
     if (!useRemote) {
       setTimeout(checkAndSwitchToRemote, 5000);
     }
@@ -157,7 +180,6 @@ async function checkAndSwitchToRemote() {
   }
 }
 
-
 async function initializeDatabase() {
   if (isCheckingConnection) {
     logConnectionStatus('Connection check already in progress');
@@ -167,44 +189,9 @@ async function initializeDatabase() {
   try {
     isCheckingConnection = true;
     const serverIP = "10.30.1.43";
-    
-    // Test network connectivity
-    console.log('\nTesting network connectivity:');
+    logConnectionStatus(`Checking server connection to ${serverIP}`);
     const online = await checkServerConnection(serverIP);
-    console.log(`Network connectivity test result: ${online}`);
-
-    // Test MySQL port
-    console.log('\nTesting MySQL port (3306):');
-    try {
-      const netTest = require('net');
-      const testSocket = new netTest.Socket();
-      
-      const portTestResult = await new Promise((resolve) => {
-        testSocket.setTimeout(2000);  // 2 second timeout
-        
-        testSocket.on('connect', () => {
-          testSocket.destroy();
-          resolve(true);
-        });
-        
-        testSocket.on('timeout', () => {
-          testSocket.destroy();
-          resolve(false);
-        });
-        
-        testSocket.on('error', (err) => {
-          console.log('Port test error:', err.message);
-          resolve(false);
-        });
-
-        testSocket.connect(3306, serverIP);
-      });
-
-      console.log(`MySQL port test result: ${portTestResult}`);
-    } catch (error) {
-      console.error('Port test failed:', error.message);
-    }
-
+    
     if (online) {
       logConnectionStatus('Server is online, attempting remote connection');
       await switchConnection(true);
@@ -214,7 +201,6 @@ async function initializeDatabase() {
     }
   } catch (error) {
     logConnectionStatus(`Error during initialization: ${error.message}`);
-    console.error('Full error:', error);
     if (isUsingRemoteDB || !db) {
       await switchConnection(false);
     }
@@ -247,7 +233,6 @@ function getCurrentConnectionInfo() {
   };
 }
 
-// More frequent checks (every 5 seconds) to ensure we switch to remote as soon as possible
 cron.schedule("*/5 * * * * *", async () => {
   if (isCheckingConnection || (Date.now() - lastCheckTime) < CHECK_INTERVAL) {
     return;
@@ -258,7 +243,6 @@ cron.schedule("*/5 * * * * *", async () => {
       await db.authenticate();
       logConnectionStatus('Connection health check successful');
       
-      // If we're on local, check if remote is available
       if (!isUsingRemoteDB) {
         await checkAndSwitchToRemote();
       }
