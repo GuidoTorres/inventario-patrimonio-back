@@ -61,7 +61,7 @@ async function verifyDatabaseConnections() {
   let remoteDB = null;
   
   try {
-    // Primero conectar a local
+    // Primero conectar a local (como está actualmente)
     console.log("Verifying local database connection...");
     localDB = getLocalDatabaseConnection();
     await localDB.authenticate();
@@ -75,7 +75,6 @@ async function verifyDatabaseConnections() {
       host: "localhost"
     });
 
-    // Verificar que realmente es la base local
     if (localDB.config.host !== 'localhost') {
       throw new Error("Local connection is not pointing to localhost");
     }
@@ -86,23 +85,14 @@ async function verifyDatabaseConnections() {
   }
 
   try {
-    // Luego conectar a remoto (asegurarnos que es diferente a local)
+    // Usar getRemoteDatabaseConnection en lugar de la creación directa
     console.log("\nVerifying remote database connection...");
-    remoteDB = new Sequelize("inventario_patrimonio", "usuario", "root", {
-      host: "10.30.1.43",
-      dialect: "mysql",
-      logging: false,
-      pool: {
-        max: 5,
-        min: 0,
-        acquire: 30000,
-        idle: 10000
-      }
-    });
-
-    await remoteDB.authenticate();
-    initModels(remoteDB);
+    remoteDB = await getRemoteDatabaseConnection();
     
+    if (!remoteDB) {
+      throw new Error("Could not establish remote database connection");
+    }
+
     const [[remoteInfo]] = await remoteDB.query('SELECT @@hostname as hostname, DATABASE() as database_name, CONNECTION_ID() as connection_id');
     console.log("Remote database info:", {
       hostname: remoteInfo.hostname,
@@ -111,7 +101,6 @@ async function verifyDatabaseConnections() {
       host: "10.30.1.43"
     });
 
-    // Verificar que las conexiones son diferentes
     if (localInfo.hostname === remoteInfo.hostname && localInfo.connectionId === remoteInfo.connectionId) {
       throw new Error("Local and remote connections are pointing to the same database");
     }
@@ -464,15 +453,12 @@ async function syncDatabases() {
 
     await syncReferenceTables(remoteDB, localDB)
   }
-
-    // Then handle updates
     console.log('\nSyncing local changes to remote...');
     await syncLocalToRemote(localDB, remoteDB);
 
     console.log('\nSyncing remote changes to local...');
     await syncRemoteToLocal(localDB, remoteDB);
 
-    // Final verification
     const [[{ count: finalLocalCount }]] = await localDB.query('SELECT COUNT(*) as count FROM bienes');
     const [[{ count: finalRemoteCount }]] = await remoteDB.query('SELECT COUNT(*) as count FROM bienes');
     
