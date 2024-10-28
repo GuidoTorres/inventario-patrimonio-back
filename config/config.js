@@ -16,7 +16,7 @@ const dbConfigs = {
     password: "root",
     host: "10.30.1.43",
     dialect: "mysql",
-    logging: false,
+    logging: true,
     pool: {
       max: 5,
       min: 0,
@@ -46,34 +46,96 @@ function logConnectionStatus(message) {
   console.log(`[${timestamp}] [DB:${connectionType}] ${message}`);
 }
 
-async function checkServerConnection(ipAddress) {
+async function createConnection(config) {
+  console.log('Attempting database connection with config:', {
+    host: config.host,
+    user: config.username,
+    database: config.database,
+    port: 3306  // MySQL default port
+  });
+
   try {
-    const response = await ping.promise.probe(ipAddress, {
-      timeout: 2,
-      extra: ['-c', '1']
-    });
-    return response.alive;
+    const sequelize = new Sequelize(
+      config.database,
+      config.username,
+      config.password,
+      {
+        host: config.host,
+        dialect: config.dialect,
+        logging: true,  // Activar logging para ver queries
+        pool: config.pool,
+        dialectOptions: {
+          connectTimeout: 30000,  // 30 segundos
+          // Opciones específicas para Windows
+          supportBigNumbers: true,
+          bigNumberStrings: true
+        }
+      }
+    );
+
+    console.log('Testing connection...');
+    await sequelize.authenticate();
+    console.log('Connection successful');
+    
+    initModels(sequelize);
+    return sequelize;
   } catch (error) {
-    return false;
+    console.error('Connection error details:', {
+      name: error.name,
+      message: error.message,
+      code: error.original?.code,
+      errno: error.original?.errno,
+      sqlState: error.original?.sqlState,
+      sqlMessage: error.original?.sqlMessage
+    });
+    throw error;
   }
 }
 
 async function createConnection(config) {
-  const sequelize = new Sequelize(
-    config.database,
-    config.username,
-    config.password,
-    {
-      host: config.host,
-      dialect: config.dialect,
-      logging: false,
-      pool: config.pool
-    }
-  );
+  console.log('Attempting database connection with config:', {
+    host: config.host,
+    user: config.username,
+    database: config.database,
+    port: 3306  // MySQL default port
+  });
 
-  await sequelize.authenticate();
-  initModels(sequelize);
-  return sequelize;
+  try {
+    const sequelize = new Sequelize(
+      config.database,
+      config.username,
+      config.password,
+      {
+        host: config.host,
+        dialect: config.dialect,
+        logging: true,  // Activar logging para ver queries
+        pool: config.pool,
+        dialectOptions: {
+          connectTimeout: 30000,  // 30 segundos
+          // Opciones específicas para Windows
+          supportBigNumbers: true,
+          bigNumberStrings: true
+        }
+      }
+    );
+
+    console.log('Testing connection...');
+    await sequelize.authenticate();
+    console.log('Connection successful');
+    
+    initModels(sequelize);
+    return sequelize;
+  } catch (error) {
+    console.error('Connection error details:', {
+      name: error.name,
+      message: error.message,
+      code: error.original?.code,
+      errno: error.original?.errno,
+      sqlState: error.original?.sqlState,
+      sqlMessage: error.original?.sqlMessage
+    });
+    throw error;
+  }
 }
 
 async function switchConnection(useRemote) {
@@ -122,6 +184,7 @@ async function checkAndSwitchToRemote() {
   }
 }
 
+
 async function initializeDatabase() {
   if (isCheckingConnection) {
     logConnectionStatus('Connection check already in progress');
@@ -131,13 +194,44 @@ async function initializeDatabase() {
   try {
     isCheckingConnection = true;
     const serverIP = "10.30.1.43";
-    logConnectionStatus(`Checking server connection to ${serverIP}`);
-    const online = await checkServerConnection(serverIP);
-
-    console.log('isOnline');
-    console.log(online);
-    console.log('====================================');
     
+    // Test network connectivity
+    console.log('\nTesting network connectivity:');
+    const online = await checkServerConnection(serverIP);
+    console.log(`Network connectivity test result: ${online}`);
+
+    // Test MySQL port
+    console.log('\nTesting MySQL port (3306):');
+    try {
+      const netTest = require('net');
+      const testSocket = new netTest.Socket();
+      
+      const portTestResult = await new Promise((resolve) => {
+        testSocket.setTimeout(2000);  // 2 second timeout
+        
+        testSocket.on('connect', () => {
+          testSocket.destroy();
+          resolve(true);
+        });
+        
+        testSocket.on('timeout', () => {
+          testSocket.destroy();
+          resolve(false);
+        });
+        
+        testSocket.on('error', (err) => {
+          console.log('Port test error:', err.message);
+          resolve(false);
+        });
+
+        testSocket.connect(3306, serverIP);
+      });
+
+      console.log(`MySQL port test result: ${portTestResult}`);
+    } catch (error) {
+      console.error('Port test failed:', error.message);
+    }
+
     if (online) {
       logConnectionStatus('Server is online, attempting remote connection');
       await switchConnection(true);
@@ -147,6 +241,7 @@ async function initializeDatabase() {
     }
   } catch (error) {
     logConnectionStatus(`Error during initialization: ${error.message}`);
+    console.error('Full error:', error);
     if (isUsingRemoteDB || !db) {
       await switchConnection(false);
     }
