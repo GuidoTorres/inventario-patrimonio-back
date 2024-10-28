@@ -46,49 +46,22 @@ function logConnectionStatus(message) {
   console.log(`[${timestamp}] [DB:${connectionType}] ${message}`);
 }
 
-async function createConnection(config) {
-  console.log('Attempting database connection with config:', {
-    host: config.host,
-    user: config.username,
-    database: config.database,
-    port: 3306  // MySQL default port
-  });
-
+async function checkServerConnection(ipAddress) {
   try {
-    const sequelize = new Sequelize(
-      config.database,
-      config.username,
-      config.password,
-      {
-        host: config.host,
-        dialect: config.dialect,
-        logging: true,  // Activar logging para ver queries
-        pool: config.pool,
-        dialectOptions: {
-          connectTimeout: 30000,  // 30 segundos
-          // Opciones específicas para Windows
-          supportBigNumbers: true,
-          bigNumberStrings: true
-        }
-      }
-    );
-
-    console.log('Testing connection...');
-    await sequelize.authenticate();
-    console.log('Connection successful');
-    
-    initModels(sequelize);
-    return sequelize;
-  } catch (error) {
-    console.error('Connection error details:', {
-      name: error.name,
-      message: error.message,
-      code: error.original?.code,
-      errno: error.original?.errno,
-      sqlState: error.original?.sqlState,
-      sqlMessage: error.original?.sqlMessage
+    console.log(`Attempting to ping ${ipAddress}...`);
+    const response = await ping.promise.probe(ipAddress, {
+      timeout: 2,
+      extra: ['-c', '1']
     });
-    throw error;
+    console.log('Ping response:', {
+      alive: response.alive,
+      output: response.output,
+      time: response.time
+    });
+    return response.alive;
+  } catch (error) {
+    console.error('Ping error:', error);
+    return false;
   }
 }
 
