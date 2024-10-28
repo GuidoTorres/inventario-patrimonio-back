@@ -1,5 +1,5 @@
 const express = require('express');
-const { getBienesSiga, getBienes, postBienes, getBienImagen, getBienesInventariados, bienesPorTrabajador, getConsultaBienes, getSigaToDB, getBienesPorInventariador, sedesPorTrabajador, getBienesFaltantes, getBienesSigaSbn, getEstadisticasBiens, generarSbnSobrante, updateFaltantes, actualizarBienesPorSBN, deleteBienes } = require('../controllers/bienes');
+const { getBienesSiga, getBienes, postBienes, getBienImagen, getBienesInventariados, bienesPorTrabajador, getConsultaBienes, getSigaToDB, getBienesPorInventariador, sedesPorTrabajador, getBienesFaltantes, getBienesSigaSbn, getEstadisticasBiens, generarSbnSobrante, updateFaltantes, actualizarBienesPorSBN, deleteBienes, getExcelInventariados } = require('../controllers/bienes');
 const upload = require('../middlewares/multer');
 const router = express.Router();
 
@@ -20,5 +20,6 @@ router.put("/", upload.single('imagen'),postBienes)
 router.put("/faltantes", updateFaltantes)
 router.post("/excel", upload.single('excel'), actualizarBienesPorSBN)
 router.get("/eliminar", deleteBienes)
+router.get("/inventariados/excel", getExcelInventariados)
 
 module.exports = router

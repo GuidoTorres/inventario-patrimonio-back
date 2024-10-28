@@ -2,9 +2,13 @@ const fetch = require("node-fetch");
 const fs = require("fs");
 const path = require("path");
 const { Sequelize, Op, where } = require("sequelize");
-const { getDatabaseConnection } = require("./../../config/config");
+const {
+  getDatabaseConnection,
+  checkServerConnection,
+} = require("./../../config/config");
 const cron = require("node-cron");
-const XLSX = require('xlsx');
+const XLSX = require("xlsx");
+const dayjs = require("dayjs");
 
 cron.schedule("0 */5 * * *", async () => {
   console.log("Sincronizando bienes...");
@@ -18,47 +22,38 @@ cron.schedule("0 */5 * * *", async () => {
 
 const getBienesSiga = async (req, res) => {
   try {
-    // Obtener los parámetros de la consulta
+    const { models } = await getDatabaseConnection();
+
     const { sede_id, ubicacion_id, dni, sbn, serie } = req.query;
-
-    // Construir la URL con los parámetros recibidos
-    let url = "http://10.30.1.42:8084/api/v1/bienes?";
-    const queryParams = new URLSearchParams();
-
-    if (sede_id) queryParams.append("sede_id", sede_id);
-    if (ubicacion_id) queryParams.append("ubicacion_id", ubicacion_id);
-    if (dni) queryParams.append("dni", dni);
-    if (sbn) queryParams.append("sbn", sbn);
-    if (serie) queryParams.append("serie", serie);
-
-    // Concatenar los parámetros a la URL
-    url += queryParams.toString();
-
-    // Hacer la solicitud a la API externa con los parámetros
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error("Error fetching data from external API");
+    // Si falla la API externa, busca en la base de datos local
+    const whereClause = {};
+    if (sede_id) whereClause.SEDE = sede_id;
+    if (ubicacion_id) {
+      whereClause[Op.and] = Sequelize.where(
+        Sequelize.fn(
+          "CONCAT",
+          Sequelize.col("TIPO_UBICAC"),
+          Sequelize.col("COD_UBICAC")
+        ),
+        ubicacion_id
+      );
     }
-
-    const externalData = await response.json();
-    if (externalData.data.length === 0) {
-      return res.status(400).json({ msg: "Bien no encontrado" });
-
+    if (dni) whereClause.docum_ident = dni;
+    if (sbn) whereClause.CODIGO_ACTIVO = sbn;
+    if (serie) whereClause.NRO_SERIE = serie;
+    const localData = await models.siga.findAll({ where: whereClause });
+    if (localData.length === 0) {
+      return res.status(400).json({
+        msg: "No se encontraron bienes!",
+      });
     }
-    // // Guardar los datos en tu base de datos local
-    // await models.bienes.bulkCreate(externalData.data, {
-    //   updateOnDuplicate: true,
-    // });
-
-    // Devolver la respuesta
-    return res.json(externalData);
+    return res.status(200).json({ data: localData });
   } catch (error) {
     console.log(error);
-    res
-      .status(500)
-      .json({ message: "Error fetching data", error: error.message });
+    res.status(500).json({ message: "Hubo un error.", error: error.message });
   }
 };
+
 const getBienes = async (req, res) => {
   try {
     const { models } = await getDatabaseConnection();
@@ -93,14 +88,14 @@ const getBienes = async (req, res) => {
       // Caso 1.1: El bien no existe en ninguna de las tablas
       if (!bien23) {
         return res.status(404).json({
-          msg: "El bien no fue encontrado en ninguna tabla.",
+          msg: "El bien no fue encontrado.",
           data: null,
         });
       }
 
       // Caso 1.2: El bien se encuentra en 'bienes23'
       return res.status(200).json({
-        msg: "El bien fue encontrado en la tabla bienes.",
+        msg: "El bien fue encontrado.",
         info: format,
       });
     }
@@ -139,7 +134,6 @@ const getBienes = async (req, res) => {
       imagen: imageUrl, // Devolver la URL de la imagen si existe
     };
 
-
     // Devolver la información del bien
     return res.status(200).json({ info });
   } catch (error) {
@@ -152,8 +146,8 @@ const getBienes = async (req, res) => {
 const getBienesInventariados = async (req, res) => {
   try {
     const { models } = await getDatabaseConnection();
-    const { usuario_id } = req.query
-    console.log(usuario_id);
+
+    const { usuario_id } = req.query;
     const bien = await models.bienes.findAll({
       attributes: { exclude: ["trabajador_id"] },
       where: {
@@ -164,7 +158,7 @@ const getBienesInventariados = async (req, res) => {
         { model: models.dependencias },
         { model: models.ubicaciones },
         { model: models.trabajadores },
-        { model: models.usuarios, where: { id: usuario_id } }
+        { model: models.usuarios, where: { id: usuario_id } },
       ],
       order: [["updatedAt", "DESC"]],
     });
@@ -181,14 +175,27 @@ const getBienesFaltantes = async (req, res) => {
     const { models } = await getDatabaseConnection();
 
     const bien = await models.bienes.findAll({
-      attributes: ["sbn", "descripcion", "marca", "modelo", "color", "serie", "situacion", "observacion", "detalles"],
+      attributes: [
+        "sbn",
+        "descripcion",
+        "marca",
+        "modelo",
+        "color",
+        "serie",
+        "situacion",
+        "observacion",
+        "detalles",
+      ],
       where: {
         inventariado: { [Op.not]: true },
       },
       include: [
         { model: models.sedes, attributes: ["nombre"] },
         { model: models.dependencias, attributes: ["nombre"] },
-        { model: models.ubicaciones, attributes: ["tipo_ubicac", "ubicac_fisica"] },
+        {
+          model: models.ubicaciones,
+          attributes: ["tipo_ubicac", "ubicac_fisica"],
+        },
         { model: models.trabajadores, attributes: ["nombre", "dni"] },
       ],
     });
@@ -326,8 +333,8 @@ const postBienes = async (req, res) => {
 
     return res.json({
       msg: bienExistente
-        ? "Bien actualizado con éxito!"
-        : "Bien creado con éxito!",
+        ? "Bien registrado con éxito!"
+        : "Bien registrado con éxito!",
       bien: bien, // Asegurarse de que 'bien' contenga la nueva foto
     });
   } catch (error) {
@@ -577,7 +584,8 @@ const getConsultaBienes = async (req, res) => {
     const { models } = await getDatabaseConnection();
 
     // Obtener los parámetros de búsqueda de la solicitud
-    const { sede_id, ubicacion_id, dni, sbn, serie, inventariado } = req.query;
+    const { sede_id, ubicacion_id, dni, sbn, serie, inventariado, usuario_id } =
+      req.query;
 
     // Construir el objeto 'where' dinámico
     const whereConditions = {};
@@ -593,6 +601,8 @@ const getConsultaBienes = async (req, res) => {
     } else if (inventariado === "false") {
       whereConditions.inventariado = { [Op.not]: true }; // Buscar donde 'inventariado' es false o null
     }
+    if (usuario_id) whereConditions.usuario_id = usuario_id;
+
     // whereConditions.inventariado = false;
 
     // Realizar la consulta a la base de datos
@@ -607,8 +617,6 @@ const getConsultaBienes = async (req, res) => {
       where: whereConditions,
     });
 
-
-
     // Devolver los bienes filtrados
     return res.json({ data: bien });
   } catch (error) {
@@ -622,109 +630,112 @@ const getConsultaBienes = async (req, res) => {
 const getSigaToDB = async (req, res) => {
   try {
     const { models } = await getDatabaseConnection(); // Asegúrate de tener la conexión configurada
-    console.log("prueba");
-    
-    // Obtener las secuencias de todos los bienes ya existentes en la base de datos
-    const bienesExistentes = await models.bienes.findAll({
-      attributes: ["secuencia"],
-    });
 
-    // Convertir los bienes existentes a un set de secuencias para una búsqueda rápida
-    const secuenciasExistentes = new Set(
-      bienesExistentes.map((bien) => bien.secuencia)
-    );
+    const online = await checkServerConnection("10.30.1.43");
 
-    // Hacer fetch a la API externa
-    let url = "http://10.30.1.42:8084/api/v1/bienes/prueba";
-    const response = await fetch(url);
+    if (online) {
+      // Obtener las secuencias de todos los bienes ya existentes en la base de datos
+      const bienesExistentes = await models.bienes.findAll({
+        attributes: ["secuencia"],
+      });
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      // Convertir los bienes existentes a un set de secuencias para una búsqueda rápida
+      const secuenciasExistentes = new Set(
+        bienesExistentes.map((bien) => bien.secuencia)
+      );
+
+      // Hacer fetch a la API externa
+      let url = "http://10.30.1.42:8084/api/v1/bienes/prueba";
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const externalData = await response.json();
+
+      // Filtrar los bienes que no están en la base de datos
+      const nuevosBienes = externalData?.data?.filter((item) => {
+        return !secuenciasExistentes.has(item.SECUENCIA); // Solo incluye bienes que no existen
+      });
+
+      // Si no hay bienes nuevos, finalizar la sincronización
+      if (nuevosBienes.length === 0) {
+        console.log("No hay nuevos bienes para sincronizar.");
+        return;
+      }
+
+      // Obtener los valores de las tablas 'dependencias' y 'ubicaciones'
+      const dependencias = await models.dependencias.findAll({
+        attributes: ["id", "tipo_ubicac"], // Solo se necesita tipo_ubicac para dependencias
+      });
+
+      const ubicaciones = await models.ubicaciones.findAll({
+        attributes: ["id", "tipo_ubicac", "ubicac_fisica"], // Para ubicaciones usamos ambos campos
+      });
+
+      // Mapear los datos y buscar los IDs correspondientes
+      const format = nuevosBienes?.map((item) => {
+        let dependenciaId = null;
+        let ubicacionId = null;
+
+        // Buscar la dependencia por tipo_ubicac (sin necesidad de comparar con ubicac_fisica)
+        if (item.COD_UBICAC === "0") {
+          // Si COD_UBICAC es "0", lo tratamos como una dependencia
+          dependenciaId = dependencias.find(
+            (dep) => Number(dep.tipo_ubicac) === Number(item.TIPO_UBICAC)
+          )?.id;
+        }
+
+        if (item.COD_UBICAC == "0") {
+          ubicacionId = ubicaciones.find(
+            (ubi) =>
+              Number(ubi.tipo_ubicac) === Number(item.TIPO_UBICAC) &&
+              Number(ubi.ubicac_fisica) === Number(item.COD_UBICAC)
+          )?.id;
+        }
+        // Buscar la ubicación por tipo_ubicac y ubicac_fisica si COD_UBICAC no es "0"
+        if (item.COD_UBICAC !== "0") {
+          ubicacionId = ubicaciones.find(
+            (ubi) =>
+              Number(ubi.tipo_ubicac) === Number(item.TIPO_UBICAC) &&
+              Number(ubi.ubicac_fisica) === Number(item.COD_UBICAC)
+          )?.id;
+        }
+
+        return {
+          secuencia: item.SECUENCIA,
+          sbn: item.CODIGO_ACTIVO,
+          descripcion: item.DESCRIPCION,
+          marca: item.MARCA,
+          modelo: item.MODELO,
+          serie: item.NRO_SERIE,
+          estado: item.ESTADO,
+          sede_id: item.SEDE,
+          ubicacion_id: ubicacionId,
+          dependencia_id: dependenciaId,
+          dni: item.docum_ident,
+          estado_patrimonial: item.ESTADO_CONSERV,
+          detalles: item.CARACTERISTICAS,
+          observacin: item.OBSERVACIONES,
+        };
+      });
+
+      // Insertar los nuevos bienes
+      await models.bienes.bulkCreate(format);
+
+      console.log(
+        "Sincronización completa. Nuevos bienes insertados:",
+        format.length
+      );
+      return res.json({ message: "Sincronización completada" });
     }
-
-    const externalData = await response.json();
-
-    // Filtrar los bienes que no están en la base de datos
-    const nuevosBienes = externalData?.data?.filter((item) => {
-      return !secuenciasExistentes.has(item.SECUENCIA); // Solo incluye bienes que no existen
-    });
-
-    // Si no hay bienes nuevos, finalizar la sincronización
-    if (nuevosBienes.length === 0) {
-      console.log("No hay nuevos bienes para sincronizar.");
-      return;
-    }
-
-    // Obtener los valores de las tablas 'dependencias' y 'ubicaciones'
-    const dependencias = await models.dependencias.findAll({
-      attributes: ["id", "tipo_ubicac"], // Solo se necesita tipo_ubicac para dependencias
-    });
-
-    const ubicaciones = await models.ubicaciones.findAll({
-      attributes: ["id", "tipo_ubicac", "ubicac_fisica"], // Para ubicaciones usamos ambos campos
-    });
-
-    // Mapear los datos y buscar los IDs correspondientes
-    const format = nuevosBienes?.map((item) => {
-      let dependenciaId = null;
-      let ubicacionId = null;
-
-      // Buscar la dependencia por tipo_ubicac (sin necesidad de comparar con ubicac_fisica)
-      if (item.COD_UBICAC === "0") {
-        // Si COD_UBICAC es "0", lo tratamos como una dependencia
-        dependenciaId = dependencias.find(
-          (dep) => Number(dep.tipo_ubicac) === Number(item.TIPO_UBICAC)
-        )?.id;
-      }
-
-      if (item.COD_UBICAC == "0") {
-        ubicacionId = ubicaciones.find(
-
-          (ubi) =>
-            Number(ubi.tipo_ubicac) === Number(item.TIPO_UBICAC) &&
-            Number(ubi.ubicac_fisica) === Number(item.COD_UBICAC)
-        )?.id;
-      }
-      // Buscar la ubicación por tipo_ubicac y ubicac_fisica si COD_UBICAC no es "0"
-      if (item.COD_UBICAC !== "0") {
-        ubicacionId = ubicaciones.find(
-          (ubi) =>
-            Number(ubi.tipo_ubicac) === Number(item.TIPO_UBICAC) &&
-            Number(ubi.ubicac_fisica) === Number(item.COD_UBICAC)
-        )?.id;
-      }
-
-      return {
-        secuencia: item.SECUENCIA,
-        sbn: item.CODIGO_ACTIVO,
-        descripcion: item.DESCRIPCION,
-        marca: item.MARCA,
-        modelo: item.MODELO,
-        serie: item.NRO_SERIE,
-        estado: item.ESTADO,
-        sede_id: item.SEDE,
-        ubicacion_id: ubicacionId,
-        dependencia_id: dependenciaId,
-        dni: item.docum_ident,
-        estado_patrimonial: item.ESTADO_CONSERV,
-        detalles: item.CARACTERISTICAS,
-        observacin: item.OBSERVACIONES
-      };
-    });
-
-    // Insertar los nuevos bienes
-    await models.bienes.bulkCreate(format);
-
-    console.log(
-      "Sincronización completa. Nuevos bienes insertados:",
-      format.length
-    );
-    return res.json({ message: "Sincronización completada" });
   } catch (error) {
     console.log(error);
-    return res
-      .status(500)
-      .json({ message: "Error durante la sincronización", error: error.message });
+    return res.status(500).json({
+      message: "Error durante la sincronización",
+      error: error.message,
+    });
   }
 };
 
@@ -744,7 +755,6 @@ const getBienesSigaSbn = async (req, res) => {
       include: [{ model: models.usuarios, attributes: ["nombre_usuario"] }],
     });
     if (bien) {
-      console.log("prueba");
       return res.status(200).json(bien);
     }
     // Verificar si el bien no existe
@@ -753,7 +763,6 @@ const getBienesSigaSbn = async (req, res) => {
       let url = `http://10.30.1.49/api/v1/bienes/sbn?sbn=${sbn}`;
       const response = await fetch(url);
 
-      console.log(response);
       if (!response.ok) {
         return res.status(500).json({
           message: "Error fetching data from external API",
@@ -842,7 +851,7 @@ const getEstadisticasBiens = async (req, res) => {
   try {
     const { models } = await getDatabaseConnection();
 
-    const total = await models.bienes.count({
+    const total = await models.siga.count({
       attributes: { exclude: ["trabajador_id"] },
     });
 
@@ -981,7 +990,7 @@ const actualizarBienesPorSBN = async (req, res) => {
   try {
     // Verificar que se haya cargado un archivo
     if (!req.file) {
-      return res.status(400).send('No se ha cargado ningún archivo.');
+      return res.status(400).send("No se ha cargado ningún archivo.");
     }
 
     // Ruta al archivo cargado
@@ -994,7 +1003,9 @@ const actualizarBienesPorSBN = async (req, res) => {
     const registrosExcel = XLSX.utils.sheet_to_json(hoja);
 
     // Extraer los 'sbn' del Excel y convertir a string, eliminar espacios y normalizar a minúsculas
-    const sbnExcel = registrosExcel.map((registro) => String(registro.cod_barra).trim().toLowerCase());
+    const sbnExcel = registrosExcel.map((registro) =>
+      String(registro.cod_barra).trim().toLowerCase()
+    );
 
     const { models } = await getDatabaseConnection();
 
@@ -1005,19 +1016,20 @@ const actualizarBienesPorSBN = async (req, res) => {
           [Op.in]: sbnExcel, // Buscar los valores de 'sbn' que están en la base de datos
         },
       },
-      attributes: ['sbn'], // Solo seleccionar el campo 'sbn'
+      attributes: ["sbn"], // Solo seleccionar el campo 'sbn'
     });
 
     // Convertir a string y normalizar los SBN encontrados en la BD
-    const sbnEnBD = bienesEncontradosEnBD.map((bien) => String(bien.sbn).trim().toLowerCase());
+    const sbnEnBD = bienesEncontradosEnBD.map((bien) =>
+      String(bien.sbn).trim().toLowerCase()
+    );
 
     // Imprimir los SBN de la base de datos y del Excel para depuración
-    console.log('SBNs en Excel (normalizados):', sbnExcel);
-    console.log('SBNs en BD (normalizados):', sbnEnBD);
+    console.log("SBNs en Excel (normalizados):", sbnExcel);
+    console.log("SBNs en BD (normalizados):", sbnEnBD);
 
     // Filtrar los 'sbn' del Excel que NO están en la base de datos
     const sbnNoEnBD = sbnExcel.filter((sbn) => !sbnEnBD.includes(sbn));
-
 
     // Obtener los registros completos desde el Excel que no están en la BD
     const registrosNuevos = registrosExcel.filter((registro) =>
@@ -1025,30 +1037,29 @@ const actualizarBienesPorSBN = async (req, res) => {
     );
 
     // Formatear los registros nuevos que se van a insertar o mostrar
-    const format = registrosNuevos.map(item => {
+    const format = registrosNuevos.map((item) => {
       return {
-
         SBN: item?.cod_barra,
         descripcion: item?.descripcion,
         modelo: item?.modelo,
         marca: item?.marca,
-        serie: item?.serie
-      }
+        serie: item?.serie,
+      };
     });
 
     await models.bienes23.bulkCreate(format, {
-      ignoreDuplicates: true // Omitir registros que ya existen
+      ignoreDuplicates: true, // Omitir registros que ya existen
     });
     fs.unlinkSync(rutaArchivo);
 
     // Responder con los registros nuevos que se van a insertar
     res.status(200).json({
-      message: 'Procesado correctamente',
+      message: "Procesado correctamente",
       registrosNuevos: format,
     });
   } catch (error) {
-    console.error('Error al procesar el archivo Excel:', error);
-    res.status(500).send('Error al procesar el archivo Excel.');
+    console.error("Error al procesar el archivo Excel:", error);
+    res.status(500).send("Error al procesar el archivo Excel.");
   }
 };
 
@@ -1056,21 +1067,109 @@ const deleteBienes = async (req, res) => {
   const { models } = await getDatabaseConnection();
 
   try {
-    const { id } = req.query
-    await models.bienes.update({ inventariado: false }, { where: { id: id } })
+    const { id } = req.query;
+    await models.bienes.update({ inventariado: false }, { where: { id: id } });
 
     return res.status(200).json({ msg: "Bien eliminado correctamente!" });
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "No se pudo eliminar el bien!" });
+    res.status(500).json({ message: "No se pudo eliminar el bien!" });
   }
+};
 
+const getExcelInventariados = async (req, res) => {
+  try {
+    const { models } = await getDatabaseConnection();
+    const { usuario_id } = req.query;
 
+    const today = dayjs().startOf("day").toDate();
+    const bienes = await models.bienes.findAll({
+      attributes: { exclude: ["trabajador_id"] },
+      updatedAt: {
+        [Op.gte]: today,
+      },
+      include: [
+        { model: models.sedes },
+        { model: models.dependencias },
+        { model: models.ubicaciones },
+        { model: models.trabajadores },
+        { model: models.usuarios, where: { id: usuario_id } },
+      ],
+      order: [["updatedAt", "DESC"]],
+    });
 
-}
+    // Transform data for Excel
+    const excelData = bienes.map((bien) => {
+      const plainBien = bien.get({ plain: true });
 
+      return {
+        SBN: plainBien.sbn || "",
+        Descripcion: plainBien.descripcion || "",
+        Marca: plainBien.marca || "",
+        Modelo: plainBien.modelo || "",
+        Serie: plainBien.serie || "",
+        Color: plainBien.color || "",
+        Estado: plainBien.estado === "1" ? "Activo" : "Baja",
+        Sede: plainBien.sede?.nombre || "",
+        Dependencia: plainBien.dependencia?.nombre || "",
+        Ubicación: plainBien.ubicacione?.nombre || "",
+        Responsable: plainBien.trabajadore?.nombre || "",
+        "DNI Responsable": plainBien.trabajadore?.dni || "",
+        "Fecha Inventario": dayjs(plainBien.updatedAt).format("DD/MM-YYYY"),
+      };
+    });
 
+    // Create workbook and worksheet
+    const workbook = XLSX.utils.book_new();
+    const worksheet = XLSX.utils.json_to_sheet(excelData);
+
+    // Set column widths
+    const columnWidths = [
+      { wch: 15 }, // SBN
+      { wch: 30 }, // Denominación
+      { wch: 15 }, // Marca
+      { wch: 15 }, // Modelo
+      { wch: 15 }, // Serie
+      { wch: 15 }, // Color
+      { wch: 10 }, // Estado
+      { wch: 20 }, // Sede
+      { wch: 25 }, // Dependencia
+      { wch: 25 }, // Ubicación
+      { wch: 30 }, // Responsable
+      { wch: 12 }, // DNI
+      { wch: 20 }, // Fecha
+      { wch: 25 }, // Inventariado por
+    ];
+    worksheet["!cols"] = columnWidths;
+
+    // Add the worksheet to the workbook
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Bienes Inventariados");
+
+    // Generate buffer
+    const excelBuffer = XLSX.write(workbook, {
+      bookType: "xlsx",
+      type: "buffer",
+    });
+
+    // Set headers for file download
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader(
+      "Content-Disposition",
+      "attachment; filename=BienesSIGA.xlsx"
+    );
+
+    // Send the file
+    return res.send(excelBuffer);
+  } catch (error) {
+    console.error("Error generating Excel:", error);
+    return res.status(500).json({
+      message: "Error generating Excel file",
+      error: error.message,
+    });
+  }
+};
 
 module.exports = {
   getBienesSiga,
@@ -1089,5 +1188,6 @@ module.exports = {
   generarSbnSobrante,
   updateFaltantes,
   actualizarBienesPorSBN,
-  deleteBienes
+  deleteBienes,
+  getExcelInventariados,
 };
