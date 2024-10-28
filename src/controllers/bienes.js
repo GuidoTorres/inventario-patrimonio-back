@@ -1081,11 +1081,16 @@ const getExcelInventariados = async (req, res) => {
     const { models } = await getDatabaseConnection();
     const { usuario_id } = req.query;
 
-    const today = dayjs().startOf("day").toDate();
+    // Obtener inicio y fin del día actual
+    const startOfDay = dayjs().startOf("day").toDate();
+    const endOfDay = dayjs().endOf("day").toDate();
+
     const bienes = await models.bienes.findAll({
       attributes: { exclude: ["trabajador_id"] },
-      updatedAt: {
-        [Op.gte]: today,
+      where: {
+        updatedAt: {
+          [Op.between]: [startOfDay, endOfDay]  // Entre inicio y fin del día actual
+        }
       },
       include: [
         { model: models.sedes },
@@ -1097,7 +1102,7 @@ const getExcelInventariados = async (req, res) => {
       order: [["updatedAt", "DESC"]],
     });
 
-    // Transform data for Excel
+    // Rest of the code remains the same...
     const excelData = bienes.map((bien) => {
       const plainBien = bien.get({ plain: true });
 
@@ -1118,11 +1123,10 @@ const getExcelInventariados = async (req, res) => {
       };
     });
 
-    // Create workbook and worksheet
+    // Create workbook and worksheet...
     const workbook = XLSX.utils.book_new();
     const worksheet = XLSX.utils.json_to_sheet(excelData);
 
-    // Set column widths
     const columnWidths = [
       { wch: 15 }, // SBN
       { wch: 30 }, // Denominación
@@ -1141,16 +1145,13 @@ const getExcelInventariados = async (req, res) => {
     ];
     worksheet["!cols"] = columnWidths;
 
-    // Add the worksheet to the workbook
     XLSX.utils.book_append_sheet(workbook, worksheet, "Bienes Inventariados");
 
-    // Generate buffer
     const excelBuffer = XLSX.write(workbook, {
       bookType: "xlsx",
       type: "buffer",
     });
 
-    // Set headers for file download
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -1160,7 +1161,6 @@ const getExcelInventariados = async (req, res) => {
       "attachment; filename=BienesSIGA.xlsx"
     );
 
-    // Send the file
     return res.send(excelBuffer);
   } catch (error) {
     console.error("Error generating Excel:", error);
