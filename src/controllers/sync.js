@@ -398,7 +398,7 @@ async function syncDatabases() {
 
     const { localDB, remoteDB } = await verifyDatabaseConnections();
 
-    // Check initial counts
+    // Obtener conteos iniciales
     const [[{ count: localCount }]] = await localDB.query('SELECT COUNT(*) as count FROM bienes');
     const [[{ count: remoteCount }]] = await remoteDB.query('SELECT COUNT(*) as count FROM bienes');
 
@@ -406,50 +406,98 @@ async function syncDatabases() {
     console.log(`Local database: ${localCount} records`);
     console.log(`Remote database: ${remoteCount} records`);
 
-    // Find missing records in both directions
-    const missingInRemoteQuery = `
-      SELECT l.sbn FROM bienes l WHERE NOT EXISTS (
-        SELECT 1 FROM bienes r WHERE r.sbn = l.sbn
-      )`;
-
-    const missingInLocalQuery = `
-      SELECT r.sbn FROM bienes r WHERE NOT EXISTS (
-        SELECT 1 FROM bienes l WHERE l.sbn = r.sbn
-      )`;
-
-    const missingInRemote = await localDB.query(missingInRemoteQuery, {
-      type: Sequelize.QueryTypes.SELECT
-    });
-
-    const missingInLocal = await remoteDB.query(missingInLocalQuery, {
-      type: Sequelize.QueryTypes.SELECT
-    });
-
-    // Handle missing records first
-    if (missingInRemote.length > 0) {
-      console.log(`Found ${missingInRemote.length} records missing in remote`);
-      await syncMissingRecords(localDB, remoteDB, missingInRemote.map(r => r.sbn), true);
-    }
-
-    if (missingInLocal.length > 0) {
-      console.log(`Found ${missingInLocal.length} records missing in local`);
-      await syncMissingRecords(localDB, remoteDB, missingInLocal.map(r => r.sbn), false);
-    }
+    // Verificar si se necesita sincronizar tablas de referencia
     const needsSync = await checkAndSyncIfNeeded(remoteDB, localDB);
-
     if (needsSync) {
+      await syncReferenceTables(remoteDB, localDB);
+    }
 
-    await syncReferenceTables(remoteDB, localDB)
-  }
-
-    // Then handle updates
+    // 1. Primero sincronizar local a remoto
     console.log('\nSyncing local changes to remote...');
-    await syncLocalToRemote(localDB, remoteDB);
+    const today = new Date().toISOString().split('T')[0];
 
+    // Obtener registros de hoy de la base local
+    const [localUpdates] = await localDB.query(`
+      SELECT * FROM bienes 
+      WHERE DATE(updatedAt) = :today 
+      OR DATE(createdAt) = :today`,
+      {
+        replacements: { today },
+        type: Sequelize.QueryTypes.SELECT
+      }
+    );
+
+    if (localUpdates.length > 0) {
+      console.log(`Found ${localUpdates.length} local records updated today`);
+      
+      for (const record of localUpdates) {
+        const recordData = { ...record };
+        delete recordData.id;  // Eliminar ID para evitar conflictos
+
+        // Verificar si existe en remoto
+        const remoteRecord = await remoteDB.models.bienes.findOne({
+          where: { sbn: record.sbn }
+        });
+
+        if (remoteRecord) {
+          // Actualizar si la versión local es más reciente
+          if (new Date(record.updatedAt) > new Date(remoteRecord.updatedAt)) {
+            await remoteDB.models.bienes.update(recordData, {
+              where: { sbn: record.sbn },
+              silent: true
+            });
+            console.log(`Updated record in remote: ${record.sbn}`);
+          }
+        } else {
+          // Crear nuevo registro en remoto
+          await remoteDB.models.bienes.create(recordData, { silent: true });
+          console.log(`Created record in remote: ${record.sbn}`);
+        }
+      }
+    }
+
+    // 2. Luego sincronizar remoto a local
     console.log('\nSyncing remote changes to local...');
-    await syncRemoteToLocal(localDB, remoteDB);
+    const [remoteUpdates] = await remoteDB.query(`
+      SELECT * FROM bienes 
+      WHERE DATE(updatedAt) = :today 
+      OR DATE(createdAt) = :today`,
+      {
+        replacements: { today },
+        type: Sequelize.QueryTypes.SELECT
+      }
+    );
 
-    // Final verification
+    if (remoteUpdates.length > 0) {
+      console.log(`Found ${remoteUpdates.length} remote records updated today`);
+      
+      for (const record of remoteUpdates) {
+        const recordData = { ...record };
+        delete recordData.id;
+
+        // Verificar si existe en local
+        const localRecord = await localDB.models.bienes.findOne({
+          where: { sbn: record.sbn }
+        });
+
+        if (localRecord) {
+          // Actualizar si la versión remota es más reciente
+          if (new Date(record.updatedAt) > new Date(localRecord.updatedAt)) {
+            await localDB.models.bienes.update(recordData, {
+              where: { sbn: record.sbn },
+              silent: true
+            });
+            console.log(`Updated record in local: ${record.sbn}`);
+          }
+        } else {
+          // Crear nuevo registro en local
+          await localDB.models.bienes.create(recordData, { silent: true });
+          console.log(`Created record in local: ${record.sbn}`);
+        }
+      }
+    }
+
+    // Verificación final
     const [[{ count: finalLocalCount }]] = await localDB.query('SELECT COUNT(*) as count FROM bienes');
     const [[{ count: finalRemoteCount }]] = await remoteDB.query('SELECT COUNT(*) as count FROM bienes');
     
@@ -457,27 +505,6 @@ async function syncDatabases() {
     console.log(`Local database: ${finalLocalCount} records`);
     console.log(`Remote database: ${finalRemoteCount} records`);
 
-    if (finalLocalCount === finalRemoteCount) {
-      console.log('✓ Databases are synchronized');
-    } else {
-      console.log('! Database counts still don\'t match');
-      
-      const differences = await remoteDB.query(`
-        SELECT 'missing_in_local' as type, r.sbn 
-        FROM bienes r 
-        WHERE NOT EXISTS (SELECT 1 FROM bienes l WHERE l.sbn = r.sbn)
-        UNION ALL
-        SELECT 'missing_in_remote' as type, l.sbn
-        FROM bienes l 
-        WHERE NOT EXISTS (SELECT 1 FROM bienes r WHERE r.sbn = l.sbn)
-      `, {
-        type: Sequelize.QueryTypes.SELECT
-      });
-
-      if (differences.length > 0) {
-        console.log('Found differences:', differences);
-      }
-    }
   } catch (error) {
     console.error("Synchronization error:", error);
   } finally {
