@@ -171,7 +171,7 @@ async function syncLocalToRemote(localDB, remoteDB) {
       attributes: ['sbn', 'updatedAt']
     });
 
-    // Crear mapa de registros remotos para búsqueda rápida
+    // Crear un mapa para búsqueda rápida
     const remoteRecordsMap = new Map(
       remoteRecords.map(record => [record.sbn, record])
     );
@@ -191,10 +191,10 @@ async function syncLocalToRemote(localDB, remoteDB) {
       delete recordData.id;
 
       if (!remoteRecord) {
-        // Registro nuevo - para crear en remoto
+        // Registro nuevo - para crear
         recordsToCreate.push(recordData);
       } else if (localRecord.updatedAt > remoteRecord.updatedAt) {
-        // Registro existente pero actualizado - para actualizar en remoto
+        // Registro existente pero actualizado - para actualizar
         recordsToUpdate.push({
           sbn: localRecord.sbn,
           data: recordData
@@ -210,17 +210,6 @@ async function syncLocalToRemote(localDB, remoteDB) {
       });
       totalSynced = recordsToCreate.length;
       console.log(`Created ${totalSynced} new records in remote database`);
-
-      // Actualizar lastSync para los registros creados
-      for (const record of recordsToCreate) {
-        await localDB.models.bienes.update(
-          { lastSync: new Date() },
-          { 
-            where: { sbn: record.sbn },
-            silent: true 
-          }
-        );
-      }
     }
 
     // Actualizar registros existentes
@@ -230,16 +219,6 @@ async function syncLocalToRemote(localDB, remoteDB) {
           where: { sbn: record.sbn },
           silent: true
         });
-
-        // Actualizar lastSync en local
-        await localDB.models.bienes.update(
-          { lastSync: new Date() },
-          { 
-            where: { sbn: record.sbn },
-            silent: true 
-          }
-        );
-
         totalUpdated++;
       }
       console.log(`Updated ${totalUpdated} existing records in remote database`);
@@ -355,10 +334,11 @@ async function getRemoteDatabaseConnection() {
 
   try {
     console.log("Checking server availability...");
-    const isServerUp = await ping.promise.probe(serverHost, {
-      timeout: 2,
-      extra: ["-c", "1"]
-    });
+    const pingOptions = process.platform === 'win32' ? 
+      { timeout: 2, extra: ['-n', '1'] } :  // Windows options
+      { timeout: 2, extra: ['-c', '1'] };   // Unix/Mac options
+
+    const isServerUp = await ping.promise.probe(serverHost, pingOptions);
 
     if (!isServerUp.alive) {
       console.log("Remote server is not accessible");

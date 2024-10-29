@@ -1,149 +1,204 @@
 const fetch = require("node-fetch");
-const { getDatabaseConnection, alterTable, checkServerConnection } = require("../../config/config");
-const { QueryTypes } = require("sequelize");
+const { Sequelize, QueryTypes } = require("sequelize");
 
 const SigaDB = async () => {
-  const BATCH_SIZE = 1000; // Process records in batches
+  const BATCH_SIZE = 1000;
   const API_URL = "http://10.30.1.42:8084/api/v1/bienes";
-  let processedCount = 0;
+  let processedCountServer = 0;
+  let processedCountLocal = 0;
   let errorCount = 0;
-  const online = await checkServerConnection("10.30.1.43");
 
-  if (online) {
-    try {
-      const { models } = await getDatabaseConnection();
+  // Mapeo exacto de campos API a BD
+  const fieldMapping = {
+    'SECUENCIA': 'SECUENCIA',
+    'CODIGO_ACTIVO': 'CODIGO_ACTIVO',
+    'DESCRIPCION': 'DESCRIPCION',
+    'ESTADO': 'ESTADO',
+    'ESTADO_CONSERV': 'ESTADO_CONSERV',
+    'EMPLEADO_FINAL': 'EMPLEADO_FINAL',
+    'SEDE': 'SEDE',
+    'nombre_sede': 'nombre_sede',
+    'CENTRO_COSTO': 'CENTRO_COSTO',
+    'NOMBRE_DEPEND': 'NOMBRE_DEPEND',
+    'TIPO_UBICAC': 'TIPO_UBICAC',
+    'COD_UBICAC': 'COD_UBICAC',
+    'UBICAC_FISICA': 'UBICAC_FISICA',
+    'docum_ident': 'docum_ident',
+    'RESPONSABLE': 'RESPONSABLE',
+    'USUARIO_FINAL': 'USUARIO_FINAL',
+    'NRO_SERIE': 'NRO_SERIE',
+    'MARCA': 'MARCA',
+    'MODELO': 'MODELO',
+    'MEDIDAS': 'MEDIDAS',
+    'CARACTERISTICAS': 'CARACTERISTICAS',
+    'OBSERVACIONES': 'OBSERVACIONES'
+  };
 
-      await alterTable(
-        "ALTER TABLE siga ADD COLUMN IF NOT EXISTS nombre_sede VARCHAR(255) NULL"
-      );
-      // Fetch API data with timeout and retry
-      const fetchWithRetry = async (url, retries = 3) => {
-        for (let i = 0; i < retries; i++) {
-          try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+  try {
+    // Inicializar conexiones
+    const serverDB = new Sequelize("inventario_patrimonio", "usuario", "root", {
+      host: "10.30.1.43",
+      dialect: "mysql",
+      logging: false
+    });
 
-            const response = await fetch(url, {
-              signal: controller.signal,
-              headers: {
-                Accept: "application/json",
-                "Content-Type": "application/json",
-              },
-            });
+    const localDB = new Sequelize("inventario_patrimonio", "root", "root", {
+      host: "localhost",
+      dialect: "mysql",
+      logging: false
+    });
 
-            clearTimeout(timeoutId);
+    // Verificar conexiones
+    await Promise.all([
+      serverDB.authenticate(),
+      localDB.authenticate()
+    ]);
+    console.log("Conexiones establecidas correctamente");
 
-            if (!response.ok) {
-              throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
-            return await response.json();
-          } catch (error) {
-            if (i === retries - 1) throw error;
-            await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1))); // Exponential backoff
-          }
-        }
-      };
-
-      // Get external data
-      console.log("Fetching external data...");
-      const externalData = await fetchWithRetry(API_URL);
-
-      if (!externalData?.data?.length) {
-        console.log("No data received from external API");
-        return;
-      }
-
-      // Get existing sequences efficiently
-      console.log("Checking existing records...");
-      const existingSequences = new Set(
-        (
-          await models.siga.findAll({
-            attributes: ["secuencia"],
-            raw: true,
-          })
-        ).map((item) => item.secuencia)
-      );
-
-      // Filter and prepare new records
-      const newRecords = externalData.data
-        .filter((item) => !existingSequences.has(item.SECUENCIA))
-        .map((item) => ({
-          ...item,
-          created_at: new Date(),
-          updated_at: new Date(),
-        }));
-
-      if (!newRecords.length) {
-        console.log("No new records to sync");
-        return;
-      }
-
-      console.log(`Found ${newRecords.length} new records to sync`);
-
-      // Process in batches with transaction
-      for (let i = 0; i < newRecords.length; i += BATCH_SIZE) {
-        const batch = newRecords.slice(i, i + BATCH_SIZE);
-        const transaction = await (await getDatabaseConnection()).transaction();
-
+    // Función para obtener datos del API con retry
+    const fetchWithRetry = async (url, retries = 3) => {
+      for (let i = 0; i < retries; i++) {
         try {
-          await models.siga.bulkCreate(batch, {
-            transaction,
-            validate: true,
-            hooks: true,
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+          const response = await fetch(url, {
+            signal: controller.signal,
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+            },
           });
 
-          await transaction.commit();
-          processedCount += batch.length;
+          clearTimeout(timeoutId);
 
-          console.log(
-            `Processed ${processedCount}/${newRecords.length} records`
-          );
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+
+          return await response.json();
         } catch (error) {
-          await transaction.rollback();
-          errorCount++;
-          console.error(
-            `Error processing batch ${i / BATCH_SIZE + 1}:`,
-            error.message
-          );
-
-          // Log failed records for later review
-          await logFailedRecords(batch, error);
+          if (i === retries - 1) throw error;
+          await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
         }
       }
-    } catch (error) {
-      console.error("Sync error:", error);
-      throw error; // Re-throw to be handled by caller
-    } finally {
-      // Report sync results
-      const endTime = new Date();
-      console.log(`
-                Sync completed:
-                - Total processed: ${processedCount}
-                - Successful: ${processedCount - errorCount}
-                - Failed batches: ${errorCount}
-                - Timestamp: ${endTime.toISOString()}
-            `);
+    };
+
+    // Obtener datos del API
+    console.log("Obteniendo datos del API...");
+    const externalData = await fetchWithRetry(API_URL);
+
+    if (!externalData?.data?.length) {
+      console.log("No se recibieron datos del API");
+      return;
     }
+
+    // Preparar registros manteniendo los nombres exactos de los campos
+    const prepareRecord = (apiData) => {
+      const record = {};
+      for (const [apiField, dbField] of Object.entries(fieldMapping)) {
+        record[dbField] = apiData[apiField];
+      }
+      return record;
+    };
+
+    // Preparar registros para cada base de datos
+    const newRecords = externalData.data.map(item => prepareRecord(item));
+
+    // Generar la consulta SQL dinámicamente
+    const generateUpsertQuery = (records) => {
+      if (records.length === 0) return null;
+
+      const columns = Object.keys(records[0]);
+      const updateClauses = columns
+        .filter(col => col !== 'SECUENCIA') // SECUENCIA es la clave primaria
+        .map(col => `${col}=VALUES(${col})`)
+        .join(',');
+
+      return `
+        INSERT INTO siga 
+        (${columns.join(',')}) 
+        VALUES :values 
+        ON DUPLICATE KEY UPDATE 
+        ${updateClauses}
+      `;
+    };
+
+    // Función para procesar lotes en una base de datos
+    const processBatch = async (db, records, isServer) => {
+      if (records.length === 0) return;
+
+      const query = generateUpsertQuery(records);
+      if (!query) return;
+
+      const transaction = await db.transaction();
+      try {
+        await db.query(query, {
+          replacements: { 
+            values: records.map(record => Object.values(record))
+          },
+          type: QueryTypes.INSERT,
+          transaction
+        });
+
+        await transaction.commit();
+        if (isServer) {
+          processedCountServer += records.length;
+        } else {
+          processedCountLocal += records.length;
+        }
+        
+        // console.log(`Procesados ${records.length} registros en ${isServer ? 'servidor' : 'local'}`);
+      } catch (error) {
+        await transaction.rollback();
+        errorCount++;
+        // console.error(`Error procesando lote en ${isServer ? 'servidor' : 'local'}:`, error.message);
+        // Log del primer registro que causó el error para debugging
+        // console.error('Ejemplo de registro con error:', records[0]);
+        await logFailedRecords(records, error, isServer);
+      }
+    };
+
+    // Procesar en ambas bases de datos
+    // console.log(`Procesando ${newRecords.length} registros...`);
+    for (let i = 0; i < newRecords.length; i += BATCH_SIZE) {
+      const batch = newRecords.slice(i, i + BATCH_SIZE);
+      
+      try {
+        await Promise.all([
+          processBatch(serverDB, batch, true),
+          processBatch(localDB, batch, false)
+        ]);
+      } catch (error) {
+        console.error("Error en el procesamiento del lote:", error.message);
+      }
+    }
+
+    // console.log(`
+    //   Sincronización completada:
+    //   - Registros procesados en servidor: ${processedCountServer}
+    //   - Registros procesados en local: ${processedCountLocal}
+    //   - Errores: ${errorCount}
+    //   - Timestamp: ${new Date().toISOString()}
+    // `);
+
+  } catch (error) {
+    console.error("Error de sincronización:", error);
+    throw error;
   }
 };
 
-// Helper function to log failed records
-const logFailedRecords = async (records, error) => {
-  try {
-    const logEntry = {
-      timestamp: new Date(),
-      error: error.message,
-      records: records,
-    };
-
-    // You could save this to a file or database
-    console.error("Failed records:", JSON.stringify(logEntry, null, 2));
-  } catch (logError) {
-    console.error("Error logging failed records:", logError);
-  }
+// Función para registrar errores
+const logFailedRecords = async (records, error, isServer) => {
+  const logEntry = {
+    timestamp: new Date(),
+    database: isServer ? 'servidor' : 'local',
+    error: error.message,
+    records: records
+  };
+  // console.error("Registros fallidos:", JSON.stringify(logEntry, null, 2));
 };
 
 module.exports = {
-  SigaDB,
+  SigaDB
 };

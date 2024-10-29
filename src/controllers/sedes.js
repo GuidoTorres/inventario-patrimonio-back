@@ -1,12 +1,18 @@
+const { Op } = require("sequelize");
 const {getDatabaseConnection} = require("./../../config/config");
 const getSedes = async (req, res) => {
     try {
         const {models} = await getDatabaseConnection(); // Obtener la conexión adecuada (remota o local)
-
+        const excludeIds =[4,5,6,8,9,10,20,24,31]
         const sedes = await models.sedes.findAll({
-            attributes:["id", "nombre"]
+            attributes: ["id", "nombre"],
+            where: {
+                id: {
+                    [Op.notIn]: excludeIds // Excluir los IDs en el array, si es proporcionado
+                }
+            }
         });
-
+        
         return res.json(sedes);
     } catch (error) {
         console.log(error);

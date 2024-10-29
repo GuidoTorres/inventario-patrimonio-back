@@ -77,12 +77,13 @@ async function checkTcpConnection(host, port = 3306) {
 
 async function checkServerConnection(ipAddress) {
   try {
+    const serverHost = "10.30.1.43";
     console.log(`Attempting to ping ${ipAddress}...`);
     const pingOptions = process.platform === 'win32' ? 
       { timeout: 2, extra: ['-n', '1'] } :  // Windows options
       { timeout: 2, extra: ['-c', '1'] };   // Unix/Mac options
 
-    const response = await ping.promise.probe(ipAddress, pingOptions);
+    const response = await ping.promise.probe(serverHost, pingOptions);
     console.log('Ping response:', {
       alive: response.alive,
       output: response.output,
@@ -92,7 +93,7 @@ async function checkServerConnection(ipAddress) {
     // Si el ping falla, intentar conexión TCP directa
     if (!response.alive) {
       console.log('Ping failed, trying direct TCP connection...');
-      const isReachable = await checkTcpConnection(ipAddress);
+      const isReachable = await checkTcpConnection(serverHost);
       return isReachable;
     }
 
@@ -100,7 +101,7 @@ async function checkServerConnection(ipAddress) {
   } catch (error) {
     console.error('Connection check error:', error);
     // Intentar conexión TCP como respaldo
-    return await checkTcpConnection(ipAddress);
+    return await checkTcpConnection(serverHost);
   }
 }
 
