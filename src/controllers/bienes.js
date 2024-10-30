@@ -175,163 +175,116 @@ const getBienesInventariados = async (req, res) => {
 
 const getBienesFaltantes = async (req, res) => {
   try {
-    const { models } = await getDatabaseConnection();
+      const { models } = await getDatabaseConnection();
+      const { sede_id, ubicacion_id, dni, sbn, serie, usuario_id } = req.query;
 
-    // Obtener los parámetros de búsqueda
-    const { sede_id, ubicacion_id, dni, sbn, serie, usuario_id } = req.query;
+      // Construir filtros base que se aplicarán a ambas consultas
+      const whereSiga = {};
+      const whereBienes = {
+          inventariado: true // Solo bienes inventariados
+      };
 
-    // Construir las condiciones de búsqueda para bienes
-    const whereBienes = {
-      inventariado: true
-    };
+      // Aplicar los mismos filtros a ambas consultas
+      if (sede_id) {
+          whereSiga.SEDE = sede_id;
+          whereBienes.sede_id = sede_id;
+      }
+      if (dni) {
+          whereSiga.docum_ident = dni;
+          whereBienes.dni = dni;
+      }
+      if (sbn) {
+          whereSiga.CODIGO_ACTIVO = sbn;
+          whereBienes.sbn = sbn;
+      }
+      if (serie) {
+          whereSiga.NRO_SERIE = serie;
+          whereBienes.serie = serie;
+      }
+      if (ubicacion_id) {
+          whereBienes.ubicacion_id = ubicacion_id;
+      }
+      if (usuario_id) {
+          whereBienes.usuario_id = usuario_id;
+      }
 
-    // Construir las condiciones de búsqueda para SIGA
-    const whereSiga = {};
-
-    // Aplicar filtros dinámicamente
-    if (sede_id) {
-      whereBienes.sede_id = sede_id;
-      whereSiga.SEDE = sede_id;
-    }
-    if (dni) {
-      whereBienes.dni = dni;
-      whereSiga.docum_ident = dni;
-    }
-    if (sbn) {
-      whereBienes.sbn = sbn;
-      whereSiga.CODIGO_ACTIVO = sbn;
-    }
-    if (serie) {
-      whereBienes.serie = serie;
-      whereSiga.NRO_SERIE = serie;
-    }
-    if (ubicacion_id) {
-      whereBienes.ubicacion_id = ubicacion_id;
-    }
-    if (usuario_id) {
-      whereBienes.usuario_id = usuario_id;
-    }
-
-    // Obtener los bienes inventariados que cumplen con los filtros
-    const bienesInventariados = await models.bienes.findAll({
-      where: whereBienes,
-      attributes: ['sbn'],
-      raw: true
-    });
-
-    const sbnsInventariados = bienesInventariados.map(b => b.sbn);
-
-    // Agregar la condición de no estar en los inventariados
-    whereSiga.CODIGO_ACTIVO = {
-      [Op.notIn]: sbnsInventariados
-    };
-
-    // Buscar en SIGA los bienes faltantes
-    const bienesFaltantes = await models.siga.findAll({
-      where: whereSiga,
-      attributes: [
-        ['CODIGO_ACTIVO', 'sbn'],
-        ['DESCRIPCION', 'descripcion'],
-        ['MARCA', 'marca'],
-        ['MODELO', 'modelo'],
-        ['NRO_SERIE', 'serie'],
-        ['SEDE', 'sede_id'],
-        ['NOMBRE_DEPEND', 'nombre_depend'],
-        ['TIPO_UBICAC', 'tipo_ubicac'],
-        ['UBICAC_FISICA', 'ubicac_fisica'],
-        ['docum_ident', 'dni'],
-        ['USUARIO_FINAL', 'usuario_final'],
-        ['ESTADO', 'estado'],
-        ['ESTADO_CONSERV', 'estado_conserv'],
-      ],
-      raw: true
-    });
-
-    // Obtener información relacionada
-    const bienesConRelaciones = await Promise.all(
-      bienesFaltantes.map(async (bien) => {
-        // Buscar sede
-        const sede = await models.sedes.findByPk(bien.sede_id, {
-          attributes: ['nombre'],
+      // 1. Obtener items de SIGA con los filtros aplicados
+      const itemsSiga = await models.siga.findAll({
+          where: whereSiga,
+          attributes: [
+              ['CODIGO_ACTIVO', 'sbn'],
+              ['DESCRIPCION', 'descripcion'],
+              ['MARCA', 'marca'],
+              ['MODELO', 'modelo'],
+              ['NRO_SERIE', 'serie'],
+              ['SEDE', 'sede_id'],
+              ['NOMBRE_DEPEND', 'nombre_depend'],
+              ['TIPO_UBICAC', 'tipo_ubicac'],
+              ['UBICAC_FISICA', 'ubicac_fisica'],
+              ['docum_ident', 'dni'],
+              ['USUARIO_FINAL', 'usuario_final'],
+              ['ESTADO', 'estado'],
+              ['ESTADO_CONSERV', 'estado_conserv']
+          ],
           raw: true
-        });
+      });
 
-        // Buscar dependencia
-        let dependencia = null;
-        if (bien.nombre_depend) {
-          dependencia = await models.dependencias.findOne({
-            where: { nombre: bien.nombre_depend },
-            attributes: ['id', 'nombre'],
-            raw: true
-          });
-        }
+      // 2. Obtener bienes inventariados con los mismos filtros
+      const bienesInventariados = await models.bienes.findAll({
+          where: whereBienes,
+          attributes: ['sbn'],
+          raw: true
+      });
 
-        // Buscar ubicación
-        let ubicacion = null;
-        if (ubicacion_id) {
-          ubicacion = await models.ubicaciones.findByPk(ubicacion_id, {
-            attributes: ['id', 'nombre'],
-            raw: true
-          });
-        } else if (bien.ubicac_fisica) {
-          ubicacion = await models.ubicaciones.findOne({
-            where: { nombre: bien.ubicac_fisica },
-            attributes: ['id', 'nombre'],
-            raw: true
-          });
-        }
+      // 3. Crear un Set con los SBNs inventariados
+      const sbnsInventariadosSet = new Set(bienesInventariados.map(b => b.sbn));
 
-        return {
+      // 4. Filtrar los items de SIGA para obtener solo los faltantes
+      const bienesFaltantes = itemsSiga.filter(item => !sbnsInventariadosSet.has(item.sbn));
+
+      // 5. Formatear los resultados
+      const bienesFormateados = bienesFaltantes.map(bien => ({
           sbn: bien.sbn,
           descripcion: bien.descripcion,
           marca: bien.marca,
           modelo: bien.modelo,
           serie: bien.serie,
-          sede: sede ? {
-            id: bien.sede_id,
-            nombre: sede.nombre
-          } : null,
-          dependencia: dependencia ? {
-            id: dependencia.id,
-            nombre: dependencia.nombre
-          } : null,
-          ubicacion: ubicacion ? {
-            id: ubicacion.id,
-            nombre: ubicacion.nombre
-          } : null,
+          sede: {
+              id: bien.sede_id,
+              nombre: bien.nombre_depend
+          },
+          ubicacion: {
+              tipo: bien.tipo_ubicac,
+              fisica: bien.ubicac_fisica
+          },
           dni: bien.dni,
           usuario: bien.usuario_final,
           estado: bien.estado,
           estado_conservacion: bien.estado_conserv,
           estado_inventario: 'faltante'
-        };
-      })
-    );
+      }));
 
-    // Devolver los resultados
-    return res.json({
-      data: bienesConRelaciones,
-      total: bienesConRelaciones.length,
-      filters: {
-        sede_id,
-        ubicacion_id,
-        dni,
-        sbn,
-        serie,
-        usuario_id
-      }
-    });
+      return res.json({
+          data: bienesFormateados,
+          total: bienesFormateados.length,
+          filters: {
+              sede_id,
+              ubicacion_id,
+              dni,
+              sbn,
+              serie,
+              usuario_id
+          }
+      });
 
   } catch (error) {
-    console.error("Error en consulta de faltantes:", error);
-    res.status(500).json({
-      message: "Error al buscar bienes faltantes",
-      error: error.message
-    });
+      console.error("Error en consulta de faltantes:", error);
+      return res.status(500).json({
+          message: "Error al buscar bienes faltantes",
+          error: error.message
+      });
   }
 };
-
-
 
 const getBienesPorInventariador = async (req, res) => {
   try {

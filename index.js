@@ -11,6 +11,7 @@ const cron = require("node-cron");
 const { syncDatabases } = require("./src/controllers/sync");
 const { SigaDB } = require("./src/controllers/siga");
 const { exec } = require('child_process');
+const { sincronizarUbicaciones } = require("./src/controllers/ubicaciones");
 
 const app = express();
 const server = http.createServer(app);
@@ -111,7 +112,7 @@ async function startServer() {
     
     server.listen(3006, () => {
       console.log(`Server running on port: 3006`);
-      openBrowserManually()
+      // openBrowserManually()
     });
 
     // Cron job for synchronization
@@ -119,6 +120,7 @@ async function startServer() {
       try {
         await syncDatabases();
         await SigaDB()
+        await sincronizarUbicaciones()
       } catch (error) {
         console.error("Synchronization error:", error.message);
       }

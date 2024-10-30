@@ -259,12 +259,13 @@ cron.schedule("*/5 * * * * *", async () => {
 async function alterTable(query) {
   const sequelize = getDatabaseConnection();
   try {
-    const [columns] = await sequelize.query(
+    // Verificar si la columna 'nombre_sede' existe
+    const [nombreSedeColumn] = await sequelize.query(
       "SHOW COLUMNS FROM siga LIKE 'nombre_sede'",
       { type: Sequelize.QueryTypes.RAW }
     );
-    
-    if (!columns.length) {
+
+    if (!nombreSedeColumn.length) {
       logConnectionStatus('Adding nombre_sede column to siga table');
       await sequelize.query(
         'ALTER TABLE siga ADD COLUMN nombre_sede VARCHAR(255) NULL',
@@ -272,12 +273,29 @@ async function alterTable(query) {
       );
       logConnectionStatus('Column nombre_sede added successfully');
     }
+
+    // Verificar si el índice único en CODIGO_ACTIVO ya existe
+    const [uniqueIndex] = await sequelize.query(
+      "SHOW INDEX FROM siga WHERE Column_name = 'CODIGO_ACTIVO' AND Non_unique = 0",
+      { type: Sequelize.QueryTypes.RAW }
+    );
+
+    if (!uniqueIndex.length) {
+      logConnectionStatus('Adding unique constraint to CODIGO_ACTIVO column in siga table');
+      await sequelize.query(
+        'ALTER TABLE siga ADD UNIQUE (CODIGO_ACTIVO)',
+        { type: Sequelize.QueryTypes.RAW }
+      );
+      logConnectionStatus('Unique constraint on CODIGO_ACTIVO added successfully');
+    }
+
     logConnectionStatus('Table altered successfully');
   } catch (error) {
     logConnectionStatus(`Error altering table: ${error.message}`);
     throw error;
   }
 }
+
 
 module.exports = {
   initializeDatabase,
