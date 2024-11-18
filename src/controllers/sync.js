@@ -4,8 +4,7 @@ const ping = require("ping");
 const initModels = require("../../app/models/init_models");
 
 let remoteDBConnection = null;
-let lastSuccessfulConnection = 0;
-const CONNECTION_RETRY_INTERVAL = 30000;
+
 async function checkAndSyncIfNeeded(remoteDB, localDB) {
   try {
     console.log("Checking if sync is needed...");
@@ -665,88 +664,6 @@ async function updateBienesReferences(remoteDB, localDB) {
   }
 }
 
-// Función para verificar la sincronización completa
-async function verifySync(remoteDB, localDB) {
-  try {
-    // Verificar conteos
-    const remoteCounts = await Promise.all([
-      remoteDB.models.sedes.count(),
-      remoteDB.models.dependencias.count(),
-      remoteDB.models.bienes.count()
-    ]);
-
-    const localCounts = await Promise.all([
-      localDB.models.sedes.count(),
-      localDB.models.dependencias.count(),
-      localDB.models.bienes.count()
-    ]);
-
-    // Verificar algunos sede_id al azar
-    const sampleBienes = await remoteDB.models.bienes.findAll({
-      where: { sede_id: { [Op.ne]: null } },
-      limit: 5,
-      order: remoteDB.random(),
-      attributes: ['sbn', 'sede_id']
-    });
-
-    const localBienes = await Promise.all(
-      sampleBienes.map(bien => 
-        localDB.models.bienes.findOne({
-          where: { sbn: bien.sbn },
-          attributes: ['sbn', 'sede_id']
-        })
-      )
-    );
-
-    console.log("\nVerification Results:");
-    console.log("Record counts (Remote/Local):");
-    console.log(`Sedes: ${remoteCounts[0]}/${localCounts[0]}`);
-    console.log(`Dependencias: ${remoteCounts[1]}/${localCounts[1]}`);
-    console.log(`Bienes: ${remoteCounts[2]}/${localCounts[2]}`);
-
-    console.log("\nSample sede_id verification:");
-    sampleBienes.forEach((remoteBien, i) => {
-      const localBien = localBienes[i];
-      console.log(`SBN: ${remoteBien.sbn} - Remote sede_id: ${remoteBien.sede_id}, Local sede_id: ${localBien?.sede_id}`);
-    });
-
-    return {
-      countsMatch: remoteCounts.every((count, i) => count === localCounts[i]),
-      referencesMatch: sampleBienes.every((remoteBien, i) => 
-        remoteBien.sede_id === localBienes[i]?.sede_id
-      )
-    };
-  } catch (error) {
-    console.error("Error verifying sync:", error);
-    throw error;
-  }
-}
-
-// Función para verificar la sincronización
-async function verifyReferenceSync(remoteDB, localDB) {
-  try {
-    // Verificar sedes
-    const remoteSedes = await remoteDB.models.sedes.count();
-    const localSedes = await localDB.models.sedes.count();
-    
-    console.log("\nVerification Results:");
-    console.log(`Sedes - Remote: ${remoteSedes}, Local: ${localSedes}`);
-    
-    // Verificar dependencias
-    const remoteDependencias = await remoteDB.models.dependencias.count();
-    const localDependencias = await localDB.models.dependencias.count();
-    
-    console.log(`Dependencias - Remote: ${remoteDependencias}, Local: ${localDependencias}`);
-    
-    return {
-      sedes: remoteSedes === localSedes,
-      dependencias: remoteDependencias === localDependencias
-    };
-  } catch (error) {
-    console.error("Error verifying sync:", error);
-    throw error;
-  }
-}
 
 
 

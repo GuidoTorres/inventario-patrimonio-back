@@ -154,135 +154,135 @@ const getBienesInventariados = async (req, res) => {
         inventariado: true,
         usuario_id: usuario_id,
       },
-    
+
       include: [
-      { model: models.sedes },
-      { model: models.dependencias },
-      { model: models.ubicaciones },
-      { model: models.trabajadores },
-      { model: models.usuarios },
-    ],
+        { model: models.sedes },
+        { model: models.dependencias },
+        { model: models.ubicaciones },
+        { model: models.trabajadores },
+        { model: models.usuarios },
+      ],
       order: [["updatedAt", "DESC"]],
     });
-  return res.json({ bien });
-} catch (error) {
-  console.log(error);
-  res
-    .status(500)
-    .json({ message: "Error fetching data", error: error.message });
-}
+    return res.json({ bien });
+  } catch (error) {
+    console.log(error);
+    res
+      .status(500)
+      .json({ message: "Error fetching data", error: error.message });
+  }
 };
 
 const getBienesFaltantes = async (req, res) => {
   try {
-      const { models } = await getDatabaseConnection();
-      const { sede_id, ubicacion_id, dni, sbn, serie, usuario_id } = req.query;
+    const { models } = await getDatabaseConnection();
+    const { sede_id, ubicacion_id, dni, sbn, serie, usuario_id } = req.query;
 
-      // Construir filtros base que se aplicarán a ambas consultas
-      const whereSiga = {};
-      const whereBienes = {
-          inventariado: true // Solo bienes inventariados
-      };
+    // Construir filtros base que se aplicarán a ambas consultas
+    const whereSiga = {};
+    const whereBienes = {
+      inventariado: true // Solo bienes inventariados
+    };
 
-      // Aplicar los mismos filtros a ambas consultas
-      if (sede_id) {
-          whereSiga.SEDE = sede_id;
-          whereBienes.sede_id = sede_id;
+    // Aplicar los mismos filtros a ambas consultas
+    if (sede_id) {
+      whereSiga.SEDE = sede_id;
+      whereBienes.sede_id = sede_id;
+    }
+    if (dni) {
+      whereSiga.docum_ident = dni;
+      whereBienes.dni = dni;
+    }
+    if (sbn) {
+      whereSiga.CODIGO_ACTIVO = sbn;
+      whereBienes.sbn = sbn;
+    }
+    if (serie) {
+      whereSiga.NRO_SERIE = serie;
+      whereBienes.serie = serie;
+    }
+    if (ubicacion_id) {
+      whereBienes.ubicacion_id = ubicacion_id;
+    }
+    if (usuario_id) {
+      whereBienes.usuario_id = usuario_id;
+    }
+
+    // 1. Obtener items de SIGA con los filtros aplicados
+    const itemsSiga = await models.siga.findAll({
+      where: whereSiga,
+      attributes: [
+        ['CODIGO_ACTIVO', 'sbn'],
+        ['DESCRIPCION', 'descripcion'],
+        ['MARCA', 'marca'],
+        ['MODELO', 'modelo'],
+        ['NRO_SERIE', 'serie'],
+        ['SEDE', 'sede_id'],
+        ['NOMBRE_DEPEND', 'nombre_depend'],
+        ['TIPO_UBICAC', 'tipo_ubicac'],
+        ['UBICAC_FISICA', 'ubicac_fisica'],
+        ['docum_ident', 'dni'],
+        ['USUARIO_FINAL', 'usuario_final'],
+        ['ESTADO', 'estado'],
+        ['ESTADO_CONSERV', 'estado_conserv']
+      ],
+      raw: true
+    });
+
+    // 2. Obtener bienes inventariados con los mismos filtros
+    const bienesInventariados = await models.bienes.findAll({
+      where: whereBienes,
+      attributes: ['sbn'],
+      raw: true
+    });
+
+    // 3. Crear un Set con los SBNs inventariados
+    const sbnsInventariadosSet = new Set(bienesInventariados.map(b => b.sbn));
+
+    // 4. Filtrar los items de SIGA para obtener solo los faltantes
+    const bienesFaltantes = itemsSiga.filter(item => !sbnsInventariadosSet.has(item.sbn));
+
+    // 5. Formatear los resultados
+    const bienesFormateados = bienesFaltantes.map(bien => ({
+      sbn: bien.sbn,
+      descripcion: bien.descripcion,
+      marca: bien.marca,
+      modelo: bien.modelo,
+      serie: bien.serie,
+      sede: {
+        id: bien.sede_id,
+        nombre: bien.nombre_depend
+      },
+      ubicacion: {
+        tipo: bien.tipo_ubicac,
+        fisica: bien.ubicac_fisica
+      },
+      dni: bien.dni,
+      usuario: bien.usuario_final,
+      estado: bien.estado,
+      estado_conservacion: bien.estado_conserv,
+      estado_inventario: 'faltante'
+    }));
+
+    return res.json({
+      data: bienesFormateados,
+      total: bienesFormateados.length,
+      filters: {
+        sede_id,
+        ubicacion_id,
+        dni,
+        sbn,
+        serie,
+        usuario_id
       }
-      if (dni) {
-          whereSiga.docum_ident = dni;
-          whereBienes.dni = dni;
-      }
-      if (sbn) {
-          whereSiga.CODIGO_ACTIVO = sbn;
-          whereBienes.sbn = sbn;
-      }
-      if (serie) {
-          whereSiga.NRO_SERIE = serie;
-          whereBienes.serie = serie;
-      }
-      if (ubicacion_id) {
-          whereBienes.ubicacion_id = ubicacion_id;
-      }
-      if (usuario_id) {
-          whereBienes.usuario_id = usuario_id;
-      }
-
-      // 1. Obtener items de SIGA con los filtros aplicados
-      const itemsSiga = await models.siga.findAll({
-          where: whereSiga,
-          attributes: [
-              ['CODIGO_ACTIVO', 'sbn'],
-              ['DESCRIPCION', 'descripcion'],
-              ['MARCA', 'marca'],
-              ['MODELO', 'modelo'],
-              ['NRO_SERIE', 'serie'],
-              ['SEDE', 'sede_id'],
-              ['NOMBRE_DEPEND', 'nombre_depend'],
-              ['TIPO_UBICAC', 'tipo_ubicac'],
-              ['UBICAC_FISICA', 'ubicac_fisica'],
-              ['docum_ident', 'dni'],
-              ['USUARIO_FINAL', 'usuario_final'],
-              ['ESTADO', 'estado'],
-              ['ESTADO_CONSERV', 'estado_conserv']
-          ],
-          raw: true
-      });
-
-      // 2. Obtener bienes inventariados con los mismos filtros
-      const bienesInventariados = await models.bienes.findAll({
-          where: whereBienes,
-          attributes: ['sbn'],
-          raw: true
-      });
-
-      // 3. Crear un Set con los SBNs inventariados
-      const sbnsInventariadosSet = new Set(bienesInventariados.map(b => b.sbn));
-
-      // 4. Filtrar los items de SIGA para obtener solo los faltantes
-      const bienesFaltantes = itemsSiga.filter(item => !sbnsInventariadosSet.has(item.sbn));
-
-      // 5. Formatear los resultados
-      const bienesFormateados = bienesFaltantes.map(bien => ({
-          sbn: bien.sbn,
-          descripcion: bien.descripcion,
-          marca: bien.marca,
-          modelo: bien.modelo,
-          serie: bien.serie,
-          sede: {
-              id: bien.sede_id,
-              nombre: bien.nombre_depend
-          },
-          ubicacion: {
-              tipo: bien.tipo_ubicac,
-              fisica: bien.ubicac_fisica
-          },
-          dni: bien.dni,
-          usuario: bien.usuario_final,
-          estado: bien.estado,
-          estado_conservacion: bien.estado_conserv,
-          estado_inventario: 'faltante'
-      }));
-
-      return res.json({
-          data: bienesFormateados,
-          total: bienesFormateados.length,
-          filters: {
-              sede_id,
-              ubicacion_id,
-              dni,
-              sbn,
-              serie,
-              usuario_id
-          }
-      });
+    });
 
   } catch (error) {
-      console.error("Error en consulta de faltantes:", error);
-      return res.status(500).json({
-          message: "Error al buscar bienes faltantes",
-          error: error.message
-      });
+    console.error("Error en consulta de faltantes:", error);
+    return res.status(500).json({
+      message: "Error al buscar bienes faltantes",
+      error: error.message
+    });
   }
 };
 
@@ -454,6 +454,7 @@ const sedesPorTrabajador = async (req, res) => {
   try {
     const { models } = await getDatabaseConnection();
     const dniTrabajador = req.query.dni; // DNI del trabajador seleccionado
+    const usuario = req.query.usuario
 
     // Verificar si se proporcionó un DNI
     if (!dniTrabajador) {
@@ -464,7 +465,7 @@ const sedesPorTrabajador = async (req, res) => {
 
     // Buscar las ubicaciones, dependencias y sedes relacionadas con los bienes del trabajador
     const bienes = await models.bienes.findAll({
-      where: { dni: dniTrabajador, inventariado: true },
+      where: { dni: dniTrabajador, inventariado: true, usuario_id: usuario },
       attributes: [], // No necesitamos los atributos de la tabla de bienes
       include: [
         {
@@ -553,7 +554,7 @@ const bienesPorTrabajador = async (req, res) => {
     const sedeId = req.query.sedeId; // Sede seleccionada
     const dependenciaId = req.query.dependenciaId; // Dependencia seleccionada
     const ubicacionId = req.query.ubicacionId; // Ubicación seleccionada
-
+    const usuarioId = req.query.usuario
     // Crear el objeto de condiciones de búsqueda dinámicamente
     const whereConditions = {};
 
@@ -616,7 +617,7 @@ const bienesPorTrabajador = async (req, res) => {
           attributes: ["nombre"],
         },
         {
-          model: models.usuarios,
+          model: models.usuarios, where: { id: usuarioId },
           include: [
             { model: models.inventariadores, attributes: ["nombre"] },
             { model: models.jefes, include: [{ model: models.grupos }] },
@@ -631,7 +632,8 @@ const bienesPorTrabajador = async (req, res) => {
       ],
       order: [["updatedAt", "DESC"]],
     });
-
+    console.log(bienes.length);
+    
     // Si no se encuentran bienes, devolver un mensaje
     if (bienes.length === 0) {
       return res.status(404).json({
@@ -1158,16 +1160,9 @@ const getExcelInventariados = async (req, res) => {
     const { models } = await getDatabaseConnection();
     const { usuario_id } = req.query;
 
-    // Obtener inicio y fin del día actual
-    const startOfDay = dayjs().startOf("day").toDate();
-    const endOfDay = dayjs().endOf("day").toDate();
-
     const bienes = await models.bienes.findAll({
       attributes: { exclude: ["trabajador_id"] },
       where: {
-        updatedAt: {
-          [Op.between]: [startOfDay, endOfDay]  // Entre inicio y fin del día actual
-        },
         usuario_id: usuario_id
       },
       include: [
