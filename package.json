@@ -33,6 +33,7 @@
     "ping": "^0.4.4",
     "sequelize": "^6.37.3",
     "socket.io": "^4.8.0",
+    "uuid": "^11.0.3",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

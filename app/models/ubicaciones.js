@@ -1,5 +1,6 @@
 
 module.exports = (sequelize, DataTypes) => {
+  const { v4: uuidv4 } = require('uuid');
 
   const ubicaciones = sequelize.define("ubicaciones", {
 

@@ -26,8 +26,8 @@ async function checkAndSyncIfNeeded(remoteDB, localDB) {
 
     // Comparación detallada de registros
     for (let i = 0; i < remoteSedes.length; i++) {
-      if (remoteSedes[i].id !== localSedes[i].id || 
-          remoteSedes[i].nombre !== localSedes[i].nombre) {
+      if (remoteSedes[i].id !== localSedes[i].id ||
+        remoteSedes[i].nombre !== localSedes[i].nombre) {
         console.log(`Difference found in sede record: ${remoteSedes[i].id}`);
         return true;
       }
@@ -42,7 +42,7 @@ async function checkAndSyncIfNeeded(remoteDB, localDB) {
   }
 }
 function getLocalDatabaseConnection() {
-  return new Sequelize("inventario_patrimonio", "root", "root", {
+  return new Sequelize("inventario_patrimonio1", "root", "root", {
     host: "localhost",
     dialect: "mysql",
     logging: false,
@@ -58,13 +58,13 @@ function getLocalDatabaseConnection() {
 async function verifyDatabaseConnections() {
   let localDB = null;
   let remoteDB = null;
-  
+
   try {
     console.log("Verifying local database connection...");
     localDB = getLocalDatabaseConnection();
     await localDB.authenticate();
     initModels(localDB);
-    
+
     const [[localInfo]] = await localDB.query('SELECT @@hostname as hostname, DATABASE() as database_name, CONNECTION_ID() as connection_id');
     console.log("Local database info:", {
       hostname: localInfo.hostname,
@@ -83,7 +83,7 @@ async function verifyDatabaseConnections() {
     if (!remoteDB) {
       throw new Error("Could not establish remote connection");
     }
-    
+
     const [[remoteInfo]] = await remoteDB.query('SELECT @@hostname as hostname, DATABASE() as database_name, CONNECTION_ID() as connection_id');
     console.log("Remote database info:", {
       hostname: remoteInfo.hostname,
@@ -101,11 +101,11 @@ async function verifyDatabaseConnections() {
 
 async function syncMissingRecords(localDB, remoteDB, missingRecords, localToRemote) {
   let totalSynced = 0;
-  
+  const errors = [];
+
   for (const sbn of missingRecords) {
     try {
       if (localToRemote) {
-        // Syncing from local to remote
         const localRecord = await localDB.models.bienes.findOne({
           where: { sbn }
         });
@@ -117,18 +117,15 @@ async function syncMissingRecords(localDB, remoteDB, missingRecords, localToRemo
           };
           delete recordData.id;
 
-          await remoteDB.models.bienes.create(recordData, { silent: true });
-          
+          await remoteDB.models.bienes.create(recordData);
           await localDB.models.bienes.update(
             { lastSync: new Date() },
-            { where: { sbn }, silent: true }
+            { where: { sbn } }
           );
-          
           totalSynced++;
           console.log(`Created record in remote: ${sbn}`);
         }
       } else {
-        // Syncing from remote to local
         const remoteRecord = await remoteDB.models.bienes.findOne({
           where: { sbn }
         });
@@ -140,44 +137,43 @@ async function syncMissingRecords(localDB, remoteDB, missingRecords, localToRemo
           };
           delete recordData.id;
 
-          await localDB.models.bienes.create(recordData, { silent: true });
-          
+          await localDB.models.bienes.create(recordData);
           await remoteDB.models.bienes.update(
             { lastSync: new Date() },
-            { where: { sbn }, silent: true }
+            { where: { sbn } }
           );
-          
           totalSynced++;
           console.log(`Created record in local: ${sbn}`);
         }
       }
     } catch (error) {
+      errors.push({ sbn, error: error.message });
       console.error(`Error syncing record ${sbn}:`, error);
     }
   }
-  
-  console.log(`Completed missing records sync. Total records synced: ${totalSynced}`);
+
+  return { totalSynced, errors };
 }
 
 async function syncLocalToRemote(localDB, remoteDB) {
   console.log("Starting Local to Remote sync");
-  let totalSynced = 0;
-  let totalUpdated = 0;
-
+  
   try {
-    // Obtener todos los registros remotos con sus SNBs y updatedAt
+    const [localCount] = await localDB.query('SELECT COUNT(*) as count FROM bienes');
+    const [remoteCount] = await remoteDB.query('SELECT COUNT(*) as count FROM bienes');
+    
+    console.log(`Initial counts - Local: ${localCount[0].count}, Remote: ${remoteCount[0].count}`);
+
+    // Obtener todos los registros
     const remoteRecords = await remoteDB.models.bienes.findAll({
-      attributes: ['sbn', 'updatedAt']
+      attributes: ['sbn', 'updatedAt', 'estado', 'descripcion', 'usuario_id']
     });
 
-    // Crear un mapa para búsqueda rápida
     const remoteRecordsMap = new Map(
       remoteRecords.map(record => [record.sbn, record])
     );
 
-    // Obtener todos los registros locales
     const bienesLocales = await localDB.models.bienes.findAll();
-
     const recordsToCreate = [];
     const recordsToUpdate = [];
 
@@ -190,10 +186,12 @@ async function syncLocalToRemote(localDB, remoteDB) {
       delete recordData.id;
 
       if (!remoteRecord) {
-        // Registro nuevo - para crear
         recordsToCreate.push(recordData);
-      } else if (localRecord.updatedAt > remoteRecord.updatedAt) {
-        // Registro existente pero actualizado - para actualizar
+      } else if (
+        localRecord.updatedAt > remoteRecord.updatedAt || 
+        (localRecord.lastSync && remoteRecord.lastSync && 
+         localRecord.lastSync > remoteRecord.lastSync)
+      ) {
         recordsToUpdate.push({
           sbn: localRecord.sbn,
           data: recordData
@@ -201,61 +199,52 @@ async function syncLocalToRemote(localDB, remoteDB) {
       }
     }
 
-    // Crear nuevos registros en lote
+    // Procesar en lotes
     if (recordsToCreate.length > 0) {
-      await remoteDB.models.bienes.bulkCreate(recordsToCreate, {
-        silent: true,
-        logging: false
+      await remoteDB.models.bienes.bulkCreate(recordsToCreate);
+      console.log(`Created ${recordsToCreate.length} records`);
+    }
+
+    for (const record of recordsToUpdate) {
+      await remoteDB.models.bienes.update(record.data, {
+        where: { sbn: record.sbn }
       });
-      totalSynced = recordsToCreate.length;
-      console.log(`Created ${totalSynced} new records in remote database`);
     }
 
-    // Actualizar registros existentes
-    if (recordsToUpdate.length > 0) {
-      for (const record of recordsToUpdate) {
-        await remoteDB.models.bienes.update(record.data, {
-          where: { sbn: record.sbn },
-          silent: true
-        });
-        totalUpdated++;
-      }
-      console.log(`Updated ${totalUpdated} existing records in remote database`);
-    }
-
-    console.log(`Sync Summary:
-      New records created: ${totalSynced}
-      Records updated: ${totalUpdated}
-      Total processed: ${totalSynced + totalUpdated}
-    `);
-
+    // Verificación final
+    const [finalLocalCount] = await localDB.query('SELECT COUNT(*) as count FROM bienes');
+    const [finalRemoteCount] = await remoteDB.query('SELECT COUNT(*) as count FROM bienes');
+    
+    return {
+      initialCounts: { local: localCount[0].count, remote: remoteCount[0].count },
+      finalCounts: { local: finalLocalCount[0].count, remote: finalRemoteCount[0].count },
+      created: recordsToCreate.length,
+      updated: recordsToUpdate.length
+    };
   } catch (error) {
-    console.error("Error during sync:", error);
+    console.error("Sync error:", error);
     throw error;
   }
-
-  return { created: totalSynced, updated: totalUpdated };
 }
 
 async function syncRemoteToLocal(localDB, remoteDB) {
   console.log("Starting Remote to Local sync");
-  let totalSynced = 0;
-  let totalUpdated = 0;
-
+  
   try {
-    // Obtener todos los registros locales con sus SNBs y updatedAt
+    const [localCount] = await localDB.query('SELECT COUNT(*) as count FROM bienes');
+    const [remoteCount] = await remoteDB.query('SELECT COUNT(*) as count FROM bienes');
+    
+    console.log(`Initial counts - Local: ${localCount[0].count}, Remote: ${remoteCount[0].count}`);
+
     const localRecords = await localDB.models.bienes.findAll({
-      attributes: ['sbn', 'updatedAt']
+      attributes: ['sbn', 'updatedAt', 'estado', 'descripcion', 'usuario_id']
     });
 
-    // Crear un mapa para búsqueda rápida
     const localRecordsMap = new Map(
       localRecords.map(record => [record.sbn, record])
     );
 
-    // Obtener todos los registros remotos
     const bienesRemotos = await remoteDB.models.bienes.findAll();
-
     const recordsToCreate = [];
     const recordsToUpdate = [];
 
@@ -268,10 +257,12 @@ async function syncRemoteToLocal(localDB, remoteDB) {
       delete recordData.id;
 
       if (!localRecord) {
-        // Registro nuevo - para crear
         recordsToCreate.push(recordData);
-      } else if (remoteRecord.updatedAt > localRecord.updatedAt) {
-        // Registro existente pero actualizado - para actualizar
+      } else if (
+        remoteRecord.updatedAt > localRecord.updatedAt || 
+        (remoteRecord.lastSync && localRecord.lastSync && 
+         remoteRecord.lastSync > localRecord.lastSync)
+      ) {
         recordsToUpdate.push({
           sbn: remoteRecord.sbn,
           data: recordData
@@ -279,40 +270,31 @@ async function syncRemoteToLocal(localDB, remoteDB) {
       }
     }
 
-    // Crear nuevos registros en lote
     if (recordsToCreate.length > 0) {
-      await localDB.models.bienes.bulkCreate(recordsToCreate, {
-        silent: true,
-        logging: false
+      await localDB.models.bienes.bulkCreate(recordsToCreate);
+      console.log(`Created ${recordsToCreate.length} records`);
+    }
+
+    for (const record of recordsToUpdate) {
+      await localDB.models.bienes.update(record.data, {
+        where: { sbn: record.sbn }
       });
-      totalSynced = recordsToCreate.length;
-      console.log(`Created ${totalSynced} new records in local database`);
     }
 
-    // Actualizar registros existentes
-    if (recordsToUpdate.length > 0) {
-      for (const record of recordsToUpdate) {
-        await localDB.models.bienes.update(record.data, {
-          where: { sbn: record.sbn },
-          silent: true
-        });
-        totalUpdated++;
-      }
-      console.log(`Updated ${totalUpdated} existing records in local database`);
-    }
-
-    console.log(`Sync Summary:
-      New records created: ${totalSynced}
-      Records updated: ${totalUpdated}
-      Total processed: ${totalSynced + totalUpdated}
-    `);
-
+    // Verificación final
+    const [finalLocalCount] = await localDB.query('SELECT COUNT(*) as count FROM bienes');
+    const [finalRemoteCount] = await remoteDB.query('SELECT COUNT(*) as count FROM bienes');
+    
+    return {
+      initialCounts: { local: localCount[0].count, remote: remoteCount[0].count },
+      finalCounts: { local: finalLocalCount[0].count, remote: finalRemoteCount[0].count },
+      created: recordsToCreate.length,
+      updated: recordsToUpdate.length
+    };
   } catch (error) {
-    console.error("Error during sync:", error);
+    console.error("Sync error:", error);
     throw error;
   }
-
-  return { created: totalSynced, updated: totalUpdated };
 }
 
 async function getRemoteDatabaseConnection() {
@@ -326,14 +308,14 @@ async function getRemoteDatabaseConnection() {
     } catch {
       try {
         await remoteDBConnection.close();
-      } catch {}
+      } catch { }
       remoteDBConnection = null;
     }
   }
 
   try {
     console.log("Checking server availability...");
-    const pingOptions = process.platform === 'win32' ? 
+    const pingOptions = process.platform === 'win32' ?
       { timeout: 2, extra: ['-n', '1'] } :  // Windows options
       { timeout: 2, extra: ['-c', '1'] };   // Unix/Mac options
 
@@ -360,7 +342,7 @@ async function getRemoteDatabaseConnection() {
     await remoteDBConnection.authenticate();
     initModels(remoteDBConnection);
     console.log("Remote connection established successfully");
-    
+
     return remoteDBConnection;
   } catch (error) {
     console.error("Failed to establish remote connection:", error);
@@ -418,20 +400,20 @@ async function syncDatabases() {
 
     if (needsSync) {
 
-    await syncReferenceTables(remoteDB, localDB)
-  }
+      await syncReferenceTables(remoteDB, localDB)
+    }
 
     // Then handle updates
     console.log('\nSyncing local changes to remote...');
-    await syncLocalToRemote(localDB, remoteDB);
+    // await syncLocalToRemote(localDB, remoteDB);
 
     console.log('\nSyncing remote changes to local...');
-    await syncRemoteToLocal(localDB, remoteDB);
+    // await syncRemoteToLocal(localDB, remoteDB);
 
     // Final verification
     const [[{ count: finalLocalCount }]] = await localDB.query('SELECT COUNT(*) as count FROM bienes');
     const [[{ count: finalRemoteCount }]] = await remoteDB.query('SELECT COUNT(*) as count FROM bienes');
-    
+
     console.log('\nFinal record counts:');
     console.log(`Local database: ${finalLocalCount} records`);
     console.log(`Remote database: ${finalRemoteCount} records`);
@@ -440,7 +422,7 @@ async function syncDatabases() {
       console.log('✓ Databases are synchronized');
     } else {
       console.log('! Database counts still don\'t match');
-      
+
       const differences = await remoteDB.query(`
         SELECT 'missing_in_local' as type, r.sbn 
         FROM bienes r 
@@ -470,11 +452,11 @@ async function syncDatabases() {
 async function syncReferenceTables(remoteDB, localDB) {
   try {
     console.log("\nSyncing reference tables and their relations...");
-    
+
     // 1. Primero sincronizar sedes
     console.log("\nSyncing Sedes...");
     await syncSedes(remoteDB, localDB);
-    
+
     // 2. Luego sincronizar dependencias
     console.log("\nSyncing Dependencias...");
     await syncDependencias(remoteDB, localDB);
@@ -482,7 +464,7 @@ async function syncReferenceTables(remoteDB, localDB) {
     // 3. Actualizar sede_id en bienes
     console.log("\nUpdating sede_id references in bienes...");
     await updateBienesReferences(remoteDB, localDB);
-    
+
     console.log("\nAll tables and references sync completed");
   } catch (error) {
     console.error("Error in sync process:", error);
@@ -535,7 +517,7 @@ async function syncSedes(remoteDB, localDB) {
     console.log('\nVerification:');
     console.log(`Remote sedes: ${remoteSedes.length}`);
     console.log(`Local sedes: ${localSedes.length}`);
-    
+
     if (remoteSedes.length === localSedes.length) {
       console.log('✓ Sedes synchronized successfully');
     } else {
@@ -555,14 +537,13 @@ async function syncSedes(remoteDB, localDB) {
     throw error;
   }
 }
-
 async function syncDependencias(remoteDB, localDB) {
   console.log("\nStarting Dependencias sync");
   try {
     // 1. Obtener dependencias remotas
     const remoteDependencias = await remoteDB.query(
       'SELECT * FROM dependencias ORDER BY id ASC',
-      { 
+      {
         type: Sequelize.QueryTypes.SELECT  // Esto es importante para obtener el array directamente
       }
     );
