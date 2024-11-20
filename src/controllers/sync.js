@@ -42,7 +42,7 @@ async function checkAndSyncIfNeeded(remoteDB, localDB) {
   }
 }
 function getLocalDatabaseConnection() {
-  return new Sequelize("inventario_patrimonio1", "root", "root", {
+  return new Sequelize("inventario_patrimonio4", "root", "root", {
     host: "localhost",
     dialect: "mysql",
     logging: false,
@@ -54,7 +54,59 @@ function getLocalDatabaseConnection() {
     }
   });
 }
+async function getRemoteDatabaseConnection() {
+  const serverHost = "10.30.1.43";
+  const now = Date.now();
 
+  if (remoteDBConnection) {
+    try {
+      await remoteDBConnection.authenticate();
+      return remoteDBConnection;
+    } catch {
+      try {
+        await remoteDBConnection.close();
+      } catch { }
+      remoteDBConnection = null;
+    }
+  }
+
+  try {
+    console.log("Checking server availability...");
+    const pingOptions = process.platform === 'win32' ?
+      { timeout: 2, extra: ['-n', '1'] } :  // Windows options
+      { timeout: 2, extra: ['-c', '1'] };   // Unix/Mac options
+
+    const isServerUp = await ping.promise.probe(serverHost, pingOptions);
+
+    if (!isServerUp.alive) {
+      console.log("Remote server is not accessible");
+      return null;
+    }
+
+    console.log("Creating new remote connection...");
+    remoteDBConnection = new Sequelize("inventario_patrimonio", "usuario", "root", {
+      host: serverHost,
+      dialect: "mysql",
+      logging: false,
+      pool: {
+        max: 5,
+        min: 0,
+        acquire: 30000,
+        idle: 10000
+      }
+    });
+
+    await remoteDBConnection.authenticate();
+    initModels(remoteDBConnection);
+    console.log("Remote connection established successfully");
+
+    return remoteDBConnection;
+  } catch (error) {
+    console.error("Failed to establish remote connection:", error);
+    remoteDBConnection = null;
+    return null;
+  }
+}
 async function verifyDatabaseConnections() {
   let localDB = null;
   let remoteDB = null;
@@ -66,12 +118,7 @@ async function verifyDatabaseConnections() {
     initModels(localDB);
 
     const [[localInfo]] = await localDB.query('SELECT @@hostname as hostname, DATABASE() as database_name, CONNECTION_ID() as connection_id');
-    console.log("Local database info:", {
-      hostname: localInfo.hostname,
-      database: localInfo.database_name,
-      connectionId: localInfo.connection_id,
-      host: "localhost"
-    });
+
   } catch (error) {
     console.error("Local database connection failed:", error);
     throw new Error("Cannot proceed without local database connection");
@@ -85,12 +132,7 @@ async function verifyDatabaseConnections() {
     }
 
     const [[remoteInfo]] = await remoteDB.query('SELECT @@hostname as hostname, DATABASE() as database_name, CONNECTION_ID() as connection_id');
-    console.log("Remote database info:", {
-      hostname: remoteInfo.hostname,
-      database: remoteInfo.database_name,
-      connectionId: remoteInfo.connection_id,
-      host: "10.30.1.43"
-    });
+
 
     return { localDB, remoteDB };
   } catch (error) {
@@ -155,25 +197,42 @@ async function syncMissingRecords(localDB, remoteDB, missingRecords, localToRemo
   return { totalSynced, errors };
 }
 
+async function shouldUpdateRecord(localRecord, remoteRecord) {
+  const localDate = new Date(localRecord.updatedAt);
+  const remoteDate = new Date(remoteRecord.updatedAt);
+
+  // No permitir cambios si ya está inventariado por otro usuario
+  if (
+      remoteRecord?.inventariado &&
+      remoteRecord.usuario_id !== localRecord.usuario_id
+  ) {
+      return false; // No se actualiza porque está inventariado por otro usuario
+  }
+
+  // Actualizar si el local tiene cambios más recientes
+  if (localDate > remoteDate) {
+      return true; // Local tiene prioridad
+  }
+
+  // Actualizar si el remoto tiene cambios más recientes
+  if (remoteDate > localDate) {
+      return false; // Remoto tiene prioridad
+  }
+
+  return false; // No hay necesidad de actualizar
+}
+
 async function syncLocalToRemote(localDB, remoteDB) {
   console.log("Starting Local to Remote sync");
-  
   try {
-    const [localCount] = await localDB.query('SELECT COUNT(*) as count FROM bienes');
-    const [remoteCount] = await remoteDB.query('SELECT COUNT(*) as count FROM bienes');
-    
+    const [localCount] = await localDB.query('SELECT COUNT(*) as count FROM bienes where usuario_id=8 and inventariado=true');
+    const [remoteCount] = await remoteDB.query('SELECT COUNT(*) as count FROM bienes where usuario_id=8 and inventariado=true');
     console.log(`Initial counts - Local: ${localCount[0].count}, Remote: ${remoteCount[0].count}`);
 
-    // Obtener todos los registros
-    const remoteRecords = await remoteDB.models.bienes.findAll({
-      attributes: ['sbn', 'updatedAt', 'estado', 'descripcion', 'usuario_id']
-    });
-
-    const remoteRecordsMap = new Map(
-      remoteRecords.map(record => [record.sbn, record])
-    );
-
+    const remoteRecords = await remoteDB.models.bienes.findAll();
     const bienesLocales = await localDB.models.bienes.findAll();
+    const remoteRecordsMap = new Map(remoteRecords.map(record => [record.sbn, record]));
+
     const recordsToCreate = [];
     const recordsToUpdate = [];
 
@@ -181,17 +240,16 @@ async function syncLocalToRemote(localDB, remoteDB) {
       const remoteRecord = remoteRecordsMap.get(localRecord.sbn);
       const recordData = {
         ...localRecord.dataValues,
-        lastSync: new Date()
+        lastSync: new Date(),
+        updatedAt: localRecord.updatedAt // Mantener fecha original
       };
       delete recordData.id;
 
       if (!remoteRecord) {
-        recordsToCreate.push(recordData);
-      } else if (
-        localRecord.updatedAt > remoteRecord.updatedAt || 
-        (localRecord.lastSync && remoteRecord.lastSync && 
-         localRecord.lastSync > remoteRecord.lastSync)
-      ) {
+        if (localRecord.inventariado) {
+          recordsToCreate.push(recordData);
+        }
+      } else if (await shouldUpdateRecord(localRecord, remoteRecord)) {
         recordsToUpdate.push({
           sbn: localRecord.sbn,
           data: recordData
@@ -199,27 +257,25 @@ async function syncLocalToRemote(localDB, remoteDB) {
       }
     }
 
-    // Procesar en lotes
     if (recordsToCreate.length > 0) {
-      await remoteDB.models.bienes.bulkCreate(recordsToCreate);
+      await remoteDB.models.bienes.bulkCreate(recordsToCreate, { silent: true });
       console.log(`Created ${recordsToCreate.length} records`);
     }
 
     for (const record of recordsToUpdate) {
       await remoteDB.models.bienes.update(record.data, {
-        where: { sbn: record.sbn }
+        where: { sbn: record.sbn },
+        silent: true
       });
     }
 
-    // Verificación final
     const [finalLocalCount] = await localDB.query('SELECT COUNT(*) as count FROM bienes');
     const [finalRemoteCount] = await remoteDB.query('SELECT COUNT(*) as count FROM bienes');
-    
+
     return {
-      initialCounts: { local: localCount[0].count, remote: remoteCount[0].count },
-      finalCounts: { local: finalLocalCount[0].count, remote: finalRemoteCount[0].count },
       created: recordsToCreate.length,
-      updated: recordsToUpdate.length
+      updated: recordsToUpdate.length,
+      finalCounts: { local: finalLocalCount[0].count, remote: finalRemoteCount[0].count }
     };
   } catch (error) {
     console.error("Sync error:", error);
@@ -229,22 +285,15 @@ async function syncLocalToRemote(localDB, remoteDB) {
 
 async function syncRemoteToLocal(localDB, remoteDB) {
   console.log("Starting Remote to Local sync");
-  
   try {
     const [localCount] = await localDB.query('SELECT COUNT(*) as count FROM bienes');
     const [remoteCount] = await remoteDB.query('SELECT COUNT(*) as count FROM bienes');
-    
     console.log(`Initial counts - Local: ${localCount[0].count}, Remote: ${remoteCount[0].count}`);
 
-    const localRecords = await localDB.models.bienes.findAll({
-      attributes: ['sbn', 'updatedAt', 'estado', 'descripcion', 'usuario_id']
-    });
-
-    const localRecordsMap = new Map(
-      localRecords.map(record => [record.sbn, record])
-    );
-
+    const localRecords = await localDB.models.bienes.findAll();
     const bienesRemotos = await remoteDB.models.bienes.findAll();
+    const localRecordsMap = new Map(localRecords.map(record => [record.sbn, record]));
+
     const recordsToCreate = [];
     const recordsToUpdate = [];
 
@@ -252,17 +301,14 @@ async function syncRemoteToLocal(localDB, remoteDB) {
       const localRecord = localRecordsMap.get(remoteRecord.sbn);
       const recordData = {
         ...remoteRecord.dataValues,
-        lastSync: new Date()
+        lastSync: new Date(),
+        updatedAt: remoteRecord.updatedAt // Mantener fecha original
       };
       delete recordData.id;
 
       if (!localRecord) {
         recordsToCreate.push(recordData);
-      } else if (
-        remoteRecord.updatedAt > localRecord.updatedAt || 
-        (remoteRecord.lastSync && localRecord.lastSync && 
-         remoteRecord.lastSync > localRecord.lastSync)
-      ) {
+      } else if (await shouldUpdateRecord(remoteRecord, localRecord)) {
         recordsToUpdate.push({
           sbn: remoteRecord.sbn,
           data: recordData
@@ -271,83 +317,28 @@ async function syncRemoteToLocal(localDB, remoteDB) {
     }
 
     if (recordsToCreate.length > 0) {
-      await localDB.models.bienes.bulkCreate(recordsToCreate);
+      await localDB.models.bienes.bulkCreate(recordsToCreate, { silent: true });
       console.log(`Created ${recordsToCreate.length} records`);
     }
 
     for (const record of recordsToUpdate) {
       await localDB.models.bienes.update(record.data, {
-        where: { sbn: record.sbn }
+        where: { sbn: record.sbn },
+        silent: true
       });
     }
 
-    // Verificación final
     const [finalLocalCount] = await localDB.query('SELECT COUNT(*) as count FROM bienes');
     const [finalRemoteCount] = await remoteDB.query('SELECT COUNT(*) as count FROM bienes');
-    
+
     return {
-      initialCounts: { local: localCount[0].count, remote: remoteCount[0].count },
-      finalCounts: { local: finalLocalCount[0].count, remote: finalRemoteCount[0].count },
       created: recordsToCreate.length,
-      updated: recordsToUpdate.length
+      updated: recordsToUpdate.length,
+      finalCounts: { local: finalLocalCount[0].count, remote: finalRemoteCount[0].count }
     };
   } catch (error) {
     console.error("Sync error:", error);
     throw error;
-  }
-}
-
-async function getRemoteDatabaseConnection() {
-  const serverHost = "10.30.1.43";
-  const now = Date.now();
-
-  if (remoteDBConnection) {
-    try {
-      await remoteDBConnection.authenticate();
-      return remoteDBConnection;
-    } catch {
-      try {
-        await remoteDBConnection.close();
-      } catch { }
-      remoteDBConnection = null;
-    }
-  }
-
-  try {
-    console.log("Checking server availability...");
-    const pingOptions = process.platform === 'win32' ?
-      { timeout: 2, extra: ['-n', '1'] } :  // Windows options
-      { timeout: 2, extra: ['-c', '1'] };   // Unix/Mac options
-
-    const isServerUp = await ping.promise.probe(serverHost, pingOptions);
-
-    if (!isServerUp.alive) {
-      console.log("Remote server is not accessible");
-      return null;
-    }
-
-    console.log("Creating new remote connection...");
-    remoteDBConnection = new Sequelize("inventario_patrimonio", "usuario", "root", {
-      host: serverHost,
-      dialect: "mysql",
-      logging: false,
-      pool: {
-        max: 5,
-        min: 0,
-        acquire: 30000,
-        idle: 10000
-      }
-    });
-
-    await remoteDBConnection.authenticate();
-    initModels(remoteDBConnection);
-    console.log("Remote connection established successfully");
-
-    return remoteDBConnection;
-  } catch (error) {
-    console.error("Failed to establish remote connection:", error);
-    remoteDBConnection = null;
-    return null;
   }
 }
 
@@ -405,10 +396,10 @@ async function syncDatabases() {
 
     // Then handle updates
     console.log('\nSyncing local changes to remote...');
-    // await syncLocalToRemote(localDB, remoteDB);
+    await syncLocalToRemote(localDB, remoteDB);
 
     console.log('\nSyncing remote changes to local...');
-    // await syncRemoteToLocal(localDB, remoteDB);
+    await syncRemoteToLocal(localDB, remoteDB);
 
     // Final verification
     const [[{ count: finalLocalCount }]] = await localDB.query('SELECT COUNT(*) as count FROM bienes');

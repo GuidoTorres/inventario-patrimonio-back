@@ -25,7 +25,7 @@ const dbConfigs = {
     }
   },
   local: {
-    database: "inventario_patrimonio1",
+    database: "inventario_patrimonio4",
     username: "root",
     password: "root",
     host: "localhost",
@@ -84,11 +84,6 @@ async function checkServerConnection(ipAddress) {
       { timeout: 2, extra: ['-c', '1'] };   // Unix/Mac options
 
     const response = await ping.promise.probe(serverHost, pingOptions);
-    console.log('Ping response:', {
-      alive: response.alive,
-      output: response.output,
-      time: response.time
-    });
 
     // Si el ping falla, intentar conexión TCP directa
     if (!response.alive) {
