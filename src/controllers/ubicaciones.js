@@ -67,11 +67,34 @@ const getUbicacionesEditar = async (req, res) => {
 const postUbicaciones = async (req, res) => {
   try {
     const { models } = await getDatabaseConnection();
+    const { dependencia_id, nombre, usuario_id } = req.body;
 
-    const { dependencia_id, nombre } = req.body;
+    const isLocal = req.isLocal;
+    let rangoInicio, rangoFin;
 
+    if (isLocal) {
+      if (!usuario_id || usuario_id < 4 || usuario_id > 14) {
+        return res.status(400).json({
+          message: "Usuario no autorizado para crear ubicaciones",
+        });
+      }
+      const usuarioIndex = usuario_id - 3;
+      rangoInicio = 2000 + ((usuarioIndex - 1) * 500);
+      rangoFin = rangoInicio + 499;
+    } else {
+      rangoInicio = 1;
+      rangoFin = 1999;
+    }
+
+    // Modificar la consulta para incluir usuario_id en el where
     const lastUbicacion = await models.ubicaciones.findOne({
-      where: { dependencia_id: dependencia_id },
+      where: {
+        dependencia_id,
+        usuario_id, // Agregar filtro por usuario
+        ubicac_fisica: {
+          [Sequelize.Op.between]: [rangoInicio, rangoFin]
+        }
+      },
       attributes: [
         [
           Sequelize.cast(Sequelize.col("ubicac_fisica"), "UNSIGNED"),
@@ -82,13 +105,24 @@ const postUbicaciones = async (req, res) => {
         [Sequelize.cast(Sequelize.col("ubicac_fisica"), "UNSIGNED"), "DESC"],
       ],
     });
-    console.log(lastUbicacion);
+
     let newUbicacFisica;
 
     if (lastUbicacion) {
       newUbicacFisica = lastUbicacion.ubicac_fisica + 1;
     } else {
-      newUbicacFisica = "1";
+      newUbicacFisica = rangoInicio; // Empezar desde el inicio del rango del usuario
+    }
+
+    // Verificación adicional de rango
+    console.log(`Usuario ${usuario_id}: Creando ubicación ${newUbicacFisica} (Rango: ${rangoInicio}-${rangoFin})`);
+
+    if (newUbicacFisica > rangoFin) {
+      return res.status(400).json({
+        message: isLocal ? 
+          `Se ha alcanzado el límite de ubicaciones para el usuario ${usuario_id}` : 
+          "Se ha alcanzado el límite de ubicaciones en servidor",
+      });
     }
 
     const info = {
@@ -96,9 +130,8 @@ const postUbicaciones = async (req, res) => {
       dependencia_id,
       tipo_ubicac: dependencia_id,
       ubicac_fisica: newUbicacFisica,
+      usuario_id
     };
-
-    console.log(info);
 
     await models.ubicaciones.create(info);
 
@@ -291,21 +324,6 @@ const sincronizarUbicaciones = async () => {
     const countLocal = countLocalResult[0].count;
     const countServer = countServerResult[0].count;
 
-    console.log(`
-      Sincronización completada:
-      - Registros en local: ${countLocal}
-      - Registros en servidor: ${countServer}
-      - Registros procesados: ${processedCount}
-      - Errores: ${errorCount}
-      - Timestamp: ${new Date().toISOString()}
-    `);
-
-    // 7. Verificar consistencia
-    if (countLocal !== countServer) {
-      console.log('¡Advertencia! Diferente número de registros entre local y servidor');
-    } else {
-      console.log('Verificación de número de registros: OK');
-    }
 
   } catch (error) {
     console.error("Error de sincronización:", error);

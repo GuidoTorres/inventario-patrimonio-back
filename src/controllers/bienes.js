@@ -78,11 +78,14 @@ const getBienes = async (req, res) => {
           sbn: req.query.sbn,
         },
       });
-
+     
+      
       const format = {
         sbn: bien23?.SBN,
         descripcion: bien23?.descripcion,
-        tipo: "sobrante",
+        tipo: "baja",
+        estado: bien23?.estado_baja ? "2": "1",
+        estado_baja: bien23?.estado_baja
       };
 
       // Caso 1.1: El bien no existe en ninguna de las tablas
@@ -1158,13 +1161,26 @@ const deleteBienes = async (req, res) => {
 const getExcelInventariados = async (req, res) => {
   try {
     const { models } = await getDatabaseConnection();
-    const { usuario_id } = req.query;
+    const { sede_id, ubicacion_id, dni, sbn, serie, inventariado, usuario_id } =
+      req.query;
 
+    // Construir el objeto 'where' dinámico
+    const whereConditions = {};
+
+    // Añadir condiciones dinámicamente si los parámetros existen
+    if (sede_id) whereConditions.sede_id = sede_id;
+    if (ubicacion_id) whereConditions.ubicacion_id = ubicacion_id;
+    if (dni) whereConditions.dni = dni;
+    if (sbn) whereConditions.sbn = sbn;
+    if (serie) whereConditions.serie = serie;
+    if (inventariado === "true") {
+      whereConditions.inventariado = true; // Buscar donde 'inventariado' es true
+    } 
+    if (usuario_id) whereConditions.usuario_id = usuario_id;
+    
     const bienes = await models.bienes.findAll({
       attributes: { exclude: ["trabajador_id"] },
-      where: {
-        usuario_id: usuario_id
-      },
+      where: whereConditions,
       include: [
         { model: models.sedes },
         { model: models.dependencias },

@@ -42,7 +42,7 @@ async function checkAndSyncIfNeeded(remoteDB, localDB) {
   }
 }
 function getLocalDatabaseConnection() {
-  return new Sequelize("inventario_patrimonio4", "root", "root", {
+  return new Sequelize("inventario_patrimonio", "root", "root", {
     host: "localhost",
     dialect: "mysql",
     logging: false,
@@ -198,40 +198,53 @@ async function syncMissingRecords(localDB, remoteDB, missingRecords, localToRemo
 }
 
 async function shouldUpdateRecord(localRecord, remoteRecord) {
+  // Si el local está inventariado y el remoto está null o no inventariado, actualizar
+  if (localRecord.inventariado && (!remoteRecord.inventariado || remoteRecord.inventariado === null)) {
+    return true;
+  }
+
   const localDate = new Date(localRecord.updatedAt);
   const remoteDate = new Date(remoteRecord.updatedAt);
 
-  // No permitir cambios si ya está inventariado por otro usuario
-  if (
-      remoteRecord?.inventariado &&
-      remoteRecord.usuario_id !== localRecord.usuario_id
-  ) {
-      return false; // No se actualiza porque está inventariado por otro usuario
+  // Solo verificar usuario_id si el remoto está inventariado
+  if (remoteRecord?.inventariado && remoteRecord.usuario_id !== localRecord.usuario_id) {
+    return false;
   }
 
-  // Actualizar si el local tiene cambios más recientes
-  if (localDate > remoteDate) {
-      return true; // Local tiene prioridad
-  }
-
-  // Actualizar si el remoto tiene cambios más recientes
-  if (remoteDate > localDate) {
-      return false; // Remoto tiene prioridad
-  }
-
-  return false; // No hay necesidad de actualizar
+  return localDate >= remoteDate;
 }
 
 async function syncLocalToRemote(localDB, remoteDB) {
   console.log("Starting Local to Remote sync");
   try {
-    const [localCount] = await localDB.query('SELECT COUNT(*) as count FROM bienes where usuario_id=8 and inventariado=true');
-    const [remoteCount] = await remoteDB.query('SELECT COUNT(*) as count FROM bienes where usuario_id=8 and inventariado=true');
+    const [localCount] = await localDB.query('SELECT COUNT(*) as count FROM bienes');
+    const [remoteCount] = await remoteDB.query('SELECT COUNT(*) as count FROM bienes');
     console.log(`Initial counts - Local: ${localCount[0].count}, Remote: ${remoteCount[0].count}`);
+    console.log("=== Sync Analysis ===");
+    
+    const bienesLocales = await localDB.models.bienes.findAll({
 
+    });
+    console.log("=== Sync Analysis: Only Mismatches ===");
+   
     const remoteRecords = await remoteDB.models.bienes.findAll();
-    const bienesLocales = await localDB.models.bienes.findAll();
     const remoteRecordsMap = new Map(remoteRecords.map(record => [record.sbn, record]));
+ 
+    for (const localRecord of bienesLocales) {
+      const remoteRecord = remoteRecordsMap.get(localRecord.sbn);
+      
+      // Solo mostrar si hay diferencias
+      if (!remoteRecord || remoteRecord.inventariado !== localRecord.inventariado) {
+        console.log(`
+          SBN: ${localRecord.sbn}
+          Inventariado local: ${localRecord.inventariado}
+          Existe en remoto: ${!!remoteRecord}
+          Remoto inventariado: ${remoteRecord?.inventariado}
+          Usuario remoto: ${remoteRecord?.usuario_id}
+        `);
+      }
+    }
+  
 
     const recordsToCreate = [];
     const recordsToUpdate = [];

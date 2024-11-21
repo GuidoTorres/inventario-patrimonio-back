@@ -25,7 +25,7 @@ const dbConfigs = {
     }
   },
   local: {
-    database: "inventario_patrimonio4",
+    database: "inventario_patrimonio",
     username: "root",
     password: "root",
     host: "localhost",

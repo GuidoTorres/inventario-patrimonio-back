@@ -501,6 +501,10 @@ module.exports = function(sequelize, DataTypes) {
     situacion: {
       type: DataTypes.CHAR(1),
       allowNull: true
+    },
+    estado_baja: {
+      type: DataTypes.BOOLEAN,
+      allowNull: true
     }
   }, {
     sequelize,
