@@ -30,7 +30,6 @@ module.exports = (sequelize, DataTypes) => {
         UBICAC_FISICA: DataTypes.STRING,
         USUARIO_FINAL: DataTypes.STRING,
         docum_ident: DataTypes.STRING,
-
         nombre_sede: DataTypes.STRING,
 
 

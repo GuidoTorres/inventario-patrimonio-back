@@ -50,7 +50,7 @@ const getUbicacionesEditar = async (req, res) => {
         nombre_dependencia: item?.dependencia?.nombre,
         sede_id: item?.dependencia?.sede?.id,
         nombre_sede: item?.dependencia?.sede?.nombre,
-        ubicacion: item?.nombre,
+        nombre: item?.nombre,
         tipo_ubicac: item?.tipo_ubicac,
         ubicac_fisica: item?.ubicac_fisica
       };
@@ -69,32 +69,32 @@ const postUbicaciones = async (req, res) => {
     const { models } = await getDatabaseConnection();
     const { dependencia_id, nombre, usuario_id } = req.body;
 
-    const isLocal = req.isLocal;
-    let rangoInicio, rangoFin;
+    const usuarioIndex = usuario_id - 3;
+    const rangoInicio = 1500 + ((usuarioIndex - 1) * 100);
+    const rangoFin = rangoInicio + 99;
 
-    if (isLocal) {
-      if (!usuario_id || usuario_id < 4 || usuario_id > 14) {
-        return res.status(400).json({
-          message: "Usuario no autorizado para crear ubicaciones",
-        });
-      }
-      const usuarioIndex = usuario_id - 3;
-      rangoInicio = 2000 + ((usuarioIndex - 1) * 500);
-      rangoFin = rangoInicio + 499;
-    } else {
-      rangoInicio = 1;
-      rangoFin = 1999;
-    }
-
-    // Modificar la consulta para incluir usuario_id en el where
-    const lastUbicacion = await models.ubicaciones.findOne({
+    // Buscar el último ID usado en el rango del usuario
+    const lastId = await models.ubicaciones.findOne({
       where: {
-        dependencia_id,
-        usuario_id, // Agregar filtro por usuario
-        ubicac_fisica: {
+        id: {
           [Sequelize.Op.between]: [rangoInicio, rangoFin]
         }
       },
+      order: [['id', 'DESC']],
+    });
+
+    // Determinar el siguiente ID dentro del rango
+    let newId = lastId ? lastId.id + 1 : rangoInicio;
+
+    if (newId > rangoFin) {
+      return res.status(400).json({
+        message: `Se ha alcanzado el límite de ubicaciones para el usuario ${usuario_id}`,
+      });
+    }
+
+    // Obtener la última ubicac_fisica (mantener la lógica original)
+    const lastUbicacion = await models.ubicaciones.findOne({
+      where: { dependencia_id },
       attributes: [
         [
           Sequelize.cast(Sequelize.col("ubicac_fisica"), "UNSIGNED"),
@@ -107,25 +107,14 @@ const postUbicaciones = async (req, res) => {
     });
 
     let newUbicacFisica;
-
     if (lastUbicacion) {
       newUbicacFisica = lastUbicacion.ubicac_fisica + 1;
     } else {
-      newUbicacFisica = rangoInicio; // Empezar desde el inicio del rango del usuario
-    }
-
-    // Verificación adicional de rango
-    console.log(`Usuario ${usuario_id}: Creando ubicación ${newUbicacFisica} (Rango: ${rangoInicio}-${rangoFin})`);
-
-    if (newUbicacFisica > rangoFin) {
-      return res.status(400).json({
-        message: isLocal ? 
-          `Se ha alcanzado el límite de ubicaciones para el usuario ${usuario_id}` : 
-          "Se ha alcanzado el límite de ubicaciones en servidor",
-      });
+      newUbicacFisica = "1";
     }
 
     const info = {
+      id: newId, // Asignar el ID del rango
       nombre,
       dependencia_id,
       tipo_ubicac: dependencia_id,
@@ -133,11 +122,11 @@ const postUbicaciones = async (req, res) => {
       usuario_id
     };
 
-    await models.ubicaciones.create(info);
+    const nuevaUbicacion = await models.ubicaciones.create(info);
 
     return res.json({
       msg: "Ubicación creada con éxito!",
-      ubicac_fisica: newUbicacFisica,
+      ubicacion: nuevaUbicacion
     });
   } catch (error) {
     console.log(error);
@@ -152,7 +141,7 @@ const updateUbicaciones = async (req, res) => {
     const { models } = await getDatabaseConnection();
 
     await models.ubicaciones.update(req.body, {
-      where: { id: id },
+      where: { id: req.params.id },
     });
     return res.json({ msg: "Ubiación actualizada con éxito!" });
   } catch (error) {
@@ -320,7 +309,7 @@ const sincronizarUbicaciones = async () => {
     // 6. Verificación final
     const [countLocalResult] = await localDB.query('SELECT COUNT(*) as count FROM ubicaciones');
     const [countServerResult] = await serverDB.query('SELECT COUNT(*) as count FROM ubicaciones');
-    
+
     const countLocal = countLocalResult[0].count;
     const countServer = countServerResult[0].count;
 
