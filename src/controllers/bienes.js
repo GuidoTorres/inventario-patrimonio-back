@@ -78,13 +78,13 @@ const getBienes = async (req, res) => {
           sbn: req.query.sbn,
         },
       });
-     
-      
+
+
       const format = {
         sbn: bien23?.SBN,
         descripcion: bien23?.descripcion,
         tipo: "baja",
-        estado: bien23?.estado_baja ? "2": "1",
+        estado: bien23?.estado_baja ? "2" : "1",
         estado_baja: bien23?.estado_baja
       };
 
@@ -458,13 +458,8 @@ const sedesPorTrabajador = async (req, res) => {
     const { models } = await getDatabaseConnection();
     const dniTrabajador = req.query.dni; // DNI del trabajador seleccionado
     const usuario = req.query.usuario
+    console.log(usuario);
 
-    // Verificar si se proporcionó un DNI
-    if (!dniTrabajador) {
-      return res.status(400).json({
-        message: "Debe proporcionar el DNI del trabajador.",
-      });
-    }
 
     // Buscar las ubicaciones, dependencias y sedes relacionadas con los bienes del trabajador
     const bienes = await models.bienes.findAll({
@@ -636,7 +631,7 @@ const bienesPorTrabajador = async (req, res) => {
       order: [["updatedAt", "DESC"]],
     });
     console.log(bienes.length);
-    
+
     // Si no se encuentran bienes, devolver un mensaje
     if (bienes.length === 0) {
       return res.status(404).json({
@@ -1175,9 +1170,9 @@ const getExcelInventariados = async (req, res) => {
     if (serie) whereConditions.serie = serie;
     if (inventariado === "true") {
       whereConditions.inventariado = true; // Buscar donde 'inventariado' es true
-    } 
+    }
     if (usuario_id) whereConditions.usuario_id = usuario_id;
-    
+
     const bienes = await models.bienes.findAll({
       attributes: { exclude: ["trabajador_id"] },
       where: whereConditions,

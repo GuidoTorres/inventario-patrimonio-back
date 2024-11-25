@@ -253,6 +253,9 @@ cron.schedule("*/5 * * * * *", async () => {
 async function alterTable(query) {
   const sequelize = getDatabaseConnection();
   try {
+
+    console.log("PRUEBA ALTER TABLE FUNCION ");
+    
     const [deleteControl] = await sequelize.query(
       "SHOW COLUMNS FROM bienes LIKE 'delete_duplicates_control'",
       { type: Sequelize.QueryTypes.RAW }

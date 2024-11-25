@@ -35,7 +35,6 @@ const postUsuario = async (req, res, next) => {
 
   const { nombre_usuario, contrasenia, jefe_id, inventariador_id, rol_id } =
     req.body;
-  console.log(req.body);
   if (!nombre_usuario || !contrasenia) {
     return res.status(400).json({ msg: "Faltan campos requeridos" });
   }

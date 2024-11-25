@@ -113,7 +113,7 @@ async function startServer() {
     
     server.listen(3006, () => {
       console.log(`Server running on port: 3006`);
-      // openBrowserManually()
+      openBrowserManually()
     });
 
     // Cron job for synchronization

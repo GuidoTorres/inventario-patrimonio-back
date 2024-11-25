@@ -1,7 +1,6 @@
 const jwt = require('jsonwebtoken');
 
 const tokenSign = async (user) => {
-  console.log(user);
   const secret = "123456"
   return jwt.sign(
     {

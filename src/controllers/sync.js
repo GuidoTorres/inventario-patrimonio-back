@@ -66,7 +66,7 @@ async function getRemoteDatabaseConnection() {
     } catch {
       try {
         await remoteDBConnection.close();
-      } catch {}
+      } catch { }
       remoteDBConnection = null;
     }
   }
@@ -209,23 +209,78 @@ async function syncMissingRecords(
 
   return { totalSynced, errors };
 }
+async function shouldUpdateRecord(sourceRecord, targetRecord) {
+  // Convertir fechas para comparación
+  const sourceDate = new Date(sourceRecord.updatedAt);
+  const targetDate = new Date(targetRecord.updatedAt);
 
-
-async function shouldUpdateRecord(localRecord, remoteRecord) {
-  // Si el registro está inventariado en el servidor, nunca actualizarlo
-  if (remoteRecord.inventariado) {
-    return false;
+  // Si las fechas son diferentes, usar la más reciente
+  if (sourceDate.getTime() !== targetDate.getTime()) {
+    // Si alguno está inventariado
+    if (sourceRecord.inventariado || targetRecord.inventariado) {
+      // Si el origen está inventariado y es más reciente, actualizar
+      if (sourceRecord.inventariado && sourceDate > targetDate) {
+        return true;
+      }
+      // Si el destino está inventariado y es más reciente, no actualizar
+      if (targetRecord.inventariado && targetDate > sourceDate) {
+        return false;
+      }
+    }
+    // Si ninguno está inventariado o la fecha del inventariado es más antigua,
+    // usar siempre el más reciente
+    return sourceDate > targetDate;
   }
 
-  // Si está inventariado localmente, actualizar remoto
-  if (localRecord.inventariado) {
-    return true;
+  // Si las fechas son iguales pero los estados de inventario son diferentes,
+  // priorizar el inventariado
+  if (sourceRecord.inventariado !== targetRecord.inventariado) {
+    return sourceRecord.inventariado;
   }
 
-  // Para registros no inventariados, usar la fecha más reciente
-  const localDate = new Date(localRecord.updatedAt);
-  const remoteDate = new Date(remoteRecord.updatedAt);
-  return localDate > remoteDate;
+  // Si todo es igual, no hay necesidad de actualizar
+  return false;
+}
+async function validateUserInventory(localDB, remoteDB) {
+  // Verificar inventarios para usuarios del 4 al 11
+  for (let userId = 4; userId <= 11; userId++) {
+    const [localInventario] = await localDB.query(
+      'SELECT COUNT(*) as count FROM bienes WHERE inventariado = true AND usuario_id = ?',
+      { 
+        replacements: [userId],
+        type: Sequelize.QueryTypes.SELECT 
+      }
+    );
+
+    const [remoteInventario] = await remoteDB.query(
+      'SELECT COUNT(*) as count FROM bienes WHERE inventariado = true AND usuario_id = ?',
+      { 
+        replacements: [userId],
+        type: Sequelize.QueryTypes.SELECT 
+      }
+    );
+
+    if (localInventario.count !== remoteInventario.count) {
+      const localSBNs = await localDB.query(
+        'SELECT sbn FROM bienes WHERE inventariado = true AND usuario_id = ?',
+        { 
+          replacements: [userId],
+          type: Sequelize.QueryTypes.SELECT 
+        }
+      );
+
+      for (const { sbn } of localSBNs) {
+        await remoteDB.query(
+          'UPDATE bienes SET inventariado = true WHERE sbn = ?',
+          { 
+            replacements: [sbn],
+            type: Sequelize.QueryTypes.UPDATE 
+          }
+        );
+      }
+      console.log(`Synchronized inventory for user ${userId}: ${localInventario.count} items`);
+    }
+  }
 }
 
 async function syncLocalToRemote(localDB, remoteDB) {
@@ -241,11 +296,11 @@ async function syncLocalToRemote(localDB, remoteDB) {
     // Obtener todos los registros remotos inventariados para protegerlos
     const remoteInventariadosInitial = await remoteDB.query(
       'SELECT sbn FROM bienes WHERE inventariado = true',
-      { 
+      {
         type: Sequelize.QueryTypes.SELECT  // Esto es importante
       }
     );
-    
+
     // Crear Set con los SNBs inventariados
     const remoteInventariadosSet = new Set(remoteInventariadosInitial.map(r => r.sbn));
 
@@ -267,11 +322,18 @@ async function syncLocalToRemote(localDB, remoteDB) {
 
       for (const localRecord of bienesLocales) {
         const remoteRecord = remoteRecordsMap.get(localRecord.sbn);
-        
-        // Si el registro está inventariado en el servidor, protegerlo
+
         if (remoteInventariadosSet.has(localRecord.sbn)) {
+          // Ya está inventariado en remoto, proteger y continuar
           totalProtected++;
           continue;
+        } else if (localRecord.inventariado) {
+          // Si está inventariado en local pero no en remoto, actualizar remoto
+          await remoteDB.models.bienes.update(
+            { inventariado: true },
+            { where: { sbn: localRecord.sbn } }
+          );
+          totalUpdated++;
         }
 
         const recordData = {
@@ -284,11 +346,11 @@ async function syncLocalToRemote(localDB, remoteDB) {
         // Crear solo si no existe en remoto y está inventariado localmente
         if (!remoteRecord && localRecord.inventariado) {
           recordsToCreate.push(recordData);
-        } 
+        }
         // Actualizar solo si existe en remoto, no está inventariado en remoto,
         // y cumple con las condiciones de shouldUpdateRecord
         else if (
-          remoteRecord && 
+          remoteRecord &&
           !remoteRecord.inventariado &&
           await shouldUpdateRecord(localRecord, remoteRecord)
         ) {
@@ -306,7 +368,7 @@ async function syncLocalToRemote(localDB, remoteDB) {
 
       for (const record of recordsToUpdate) {
         await remoteDB.models.bienes.update(record.data, {
-          where: { 
+          where: {
             sbn: record.sbn,
             inventariado: false // Asegurar que solo actualiza no inventariados
           },
@@ -317,11 +379,11 @@ async function syncLocalToRemote(localDB, remoteDB) {
 
       offset += BATCH_SIZE;
       console.log(`
-Progreso del lote:
-- Procesados: ${offset}
-- Creados: ${totalCreated}
-- Actualizados: ${totalUpdated}
-- Protegidos (inventariados en remoto): ${totalProtected}
+      Progreso del lote:
+      - Procesados: ${offset}
+      - Creados: ${totalCreated}
+      - Actualizados: ${totalUpdated}
+      - Protegidos (inventariados en remoto): ${totalProtected}
       `);
     }
 
@@ -342,16 +404,16 @@ Progreso del lote:
     );
 
     console.log(`
-=== Resumen de sincronización Local → Remoto ===
-✓ Registros creados: ${totalCreated}
-✓ Registros actualizados: ${totalUpdated}
-✓ Registros protegidos: ${totalProtected}
+      === Resumen de sincronización Local → Remoto ===
+      ✓ Registros creados: ${totalCreated}
+      ✓ Registros actualizados: ${totalUpdated}
+      ✓ Registros protegidos: ${totalProtected}
 
-Estadísticas:
-- Total registros en local: ${finalLocalCount}
-- Total registros en remoto: ${finalRemoteCount}
-- Inventariados en local: ${localInventariados}
-- Inventariados en remoto: ${remoteInventariados}
+      Estadísticas:
+      - Total registros en local: ${finalLocalCount}
+      - Total registros en remoto: ${finalRemoteCount}
+      - Inventariados en local: ${localInventariados}
+      - Inventariados en remoto: ${remoteInventariados}
     `);
 
     return {
@@ -404,8 +466,21 @@ async function syncRemoteToLocal(localDB, remoteDB) {
       for (const remoteRecord of bienesRemotos) {
         const localRecord = localRecordsMap.get(remoteRecord.sbn);
 
-        // NUNCA sobrescribir registros inventariados localmente
-        if (localRecord?.inventariado) {
+        if (localRecord?.inventariado || remoteRecord.inventariado) {
+          // Si está inventariado en cualquiera de las dos bases, asegurar que esté en ambas
+          if (!localRecord?.inventariado) {
+            await localDB.models.bienes.update(
+              { inventariado: true },
+              { where: { sbn: remoteRecord.sbn } }
+            );
+            totalUpdated++;
+          }
+          if (!remoteRecord.inventariado) {
+            await remoteDB.models.bienes.update(
+              { inventariado: true },
+              { where: { sbn: remoteRecord.sbn } }
+            );
+          }
           totalProtected++;
           continue;
         }
@@ -425,10 +500,10 @@ async function syncRemoteToLocal(localDB, remoteDB) {
           }
 
           // Si existe pero no está inventariado localmente y el remoto es más reciente
-          if (!localRecord.inventariado && 
-              new Date(remoteRecord.updatedAt) > new Date(localRecord.updatedAt)) {
+          if (!localRecord.inventariado &&
+            new Date(remoteRecord.updatedAt) > new Date(localRecord.updatedAt)) {
             await localDB.models.bienes.update(recordData, {
-              where: { 
+              where: {
                 sbn: remoteRecord.sbn,
                 inventariado: false // Doble verificación
               }
@@ -443,12 +518,12 @@ async function syncRemoteToLocal(localDB, remoteDB) {
 
       offset += bienesRemotos.length;
       console.log(`
-Progreso del lote:
-- Procesados: ${offset}
-- Creados: ${totalCreated}
-- Actualizados: ${totalUpdated}
-- Protegidos (inventariados local): ${totalProtected}
-      `);
+      Progreso del lote:
+      - Procesados: ${offset}
+      - Creados: ${totalCreated}
+      - Actualizados: ${totalUpdated}
+      - Protegidos (inventariados local): ${totalProtected}
+            `);
     }
 
     // Verificación final
@@ -555,6 +630,15 @@ async function syncDatabases() {
     const [[{ count: finalRemoteCount }]] = await remoteDB.query(
       "SELECT COUNT(*) as count FROM bienes"
     );
+    const usuariosTotal = await localDB.query('SELECT DISTINCT usuario_id FROM bienes WHERE usuario_id IS NOT NULL');
+    for (const { usuario_id } of usuariosTotal) {
+      await validateUserInventory(localDB, remoteDB, usuario_id);
+    }
+
+    // Final status output
+    console.log(`\nFinal counts after user inventory validation:`);
+    console.log(`Local database: ${finalLocalCount} records`);
+    console.log(`Remote database: ${finalRemoteCount} records`);
 
     console.log("\nFinal record counts:");
     console.log(`Local database: ${finalLocalCount} records`);
@@ -583,6 +667,10 @@ async function syncDatabases() {
       if (differences.length > 0) {
         console.log("Found differences:", differences);
       }
+    }
+    const usuarios = await localDB.query('SELECT DISTINCT usuario_id FROM bienes WHERE usuario_id IS NOT NULL');
+    for (const { usuario_id } of usuarios) {
+      await validateUserInventory(localDB, remoteDB);
     }
   } catch (error) {
     console.error("Synchronization error:", error);

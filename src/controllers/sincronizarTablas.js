@@ -50,7 +50,7 @@ const TABLE_CONFIGS = {
     tableConfig,
     localDB,
     serverDB,
-    direction = 'both'
+    direction = 'server-to-local'
   ) => {
     const { tableName, columns } = tableConfig;
     let processedCount = 0;
@@ -196,7 +196,7 @@ const TABLE_CONFIGS = {
     }
   };
   
-  const sincronizarTodo = async (direction = 'both') => {
+  const sincronizarTodo = async (direction = 'server-to-local') => {
     let serverDB, localDB;
   
     try {
