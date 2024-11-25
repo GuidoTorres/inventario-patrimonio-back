@@ -169,14 +169,14 @@ const deleteUbicaciones = async (req, res) => {
     });
   }
 };
-const sincronizarUbicaciones = async () => {
+const sincronizarUbicaciones = async (direction = 'both') => {
   let processedCount = 0;
   let errorCount = 0;
 
   try {
     // Inicializar conexiones
-    const serverDB = new Sequelize("inventario_patrimonio", "usuario", "root", {
-      host: "10.30.1.43",
+    const serverDB = new Sequelize("inventario_patrimonio", "root", "root", {
+      host: "localhost",
       dialect: "mysql",
       logging: false
     });
@@ -221,7 +221,7 @@ const sincronizarUbicaciones = async () => {
     const localMap = new Map(ubicacionesLocal.map(u => [u.id, u]));
     const serverMap = new Map(ubicacionesServer.map(u => [u.id, u]));
 
-    // 3. Encontrar registros para sincronizar
+    // 3. Encontrar registros para sincronizar en ambas direcciones
     const registrosNuevosEnServer = ubicacionesServer.filter(u => !localMap.has(u.id));
     const registrosActualizadosEnServer = ubicacionesServer.filter(u => {
       const localReg = localMap.get(u.id);
@@ -229,16 +229,25 @@ const sincronizarUbicaciones = async () => {
       return new Date(u.updatedAt) > new Date(localReg.updatedAt);
     });
 
+    const registrosNuevosEnLocal = ubicacionesLocal.filter(u => !serverMap.has(u.id));
+    const registrosActualizadosEnLocal = ubicacionesLocal.filter(u => {
+      const serverReg = serverMap.get(u.id);
+      if (!serverReg) return false;
+      return new Date(u.updatedAt) > new Date(serverReg.updatedAt);
+    });
+
     console.log(`
       Análisis de registros:
       - Nuevos en servidor: ${registrosNuevosEnServer.length}
       - Actualizados en servidor: ${registrosActualizadosEnServer.length}
+      - Nuevos en local: ${registrosNuevosEnLocal.length}
+      - Actualizados en local: ${registrosActualizadosEnLocal.length}
     `);
 
     // 4. Funciones auxiliares para insert y update
-    const insertarRegistro = async (registro) => {
+    const insertarRegistro = async (registro, targetDB, source) => {
       try {
-        await localDB.query(
+        await targetDB.query(
           `INSERT INTO ubicaciones 
            (id, nombre, dependencia_id, tipo_ubicac, ubicac_fisica, createdAt, updatedAt)
            VALUES (:id, :nombre, :dependencia_id, :tipo_ubicac, :ubicac_fisica, :createdAt, :updatedAt)`,
@@ -256,16 +265,16 @@ const sincronizarUbicaciones = async () => {
           }
         );
         processedCount++;
-        console.log(`Registro ID ${registro.id} "${registro.nombre}" copiado a local`);
+        console.log(`Registro ID ${registro.id} "${registro.nombre}" copiado a ${source}`);
       } catch (error) {
         errorCount++;
         console.error(`Error copiando ID ${registro.id} "${registro.nombre}":`, error.message);
       }
     };
 
-    const actualizarRegistro = async (registro) => {
+    const actualizarRegistro = async (registro, targetDB, source) => {
       try {
-        await localDB.query(
+        await targetDB.query(
           `UPDATE ubicaciones 
            SET nombre = :nombre,
                dependencia_id = :dependencia_id,
@@ -282,28 +291,42 @@ const sincronizarUbicaciones = async () => {
           }
         );
         processedCount++;
-        console.log(`Registro ID ${registro.id} "${registro.nombre}" actualizado en local`);
+        console.log(`Registro ID ${registro.id} "${registro.nombre}" actualizado en ${source}`);
       } catch (error) {
         errorCount++;
         console.error(`Error actualizando ID ${registro.id} "${registro.nombre}":`, error.message);
       }
     };
 
-    // 5. Sincronizar registros del servidor al local
-    await localDB.query('SET FOREIGN_KEY_CHECKS = 0');
-
-    try {
-      // Insertar nuevos registros del servidor
-      for (const ubicacion of registrosNuevosEnServer) {
-        await insertarRegistro(ubicacion);
+    // 5. Sincronizar registros en ambas direcciones
+    if (direction === 'both' || direction === 'server-to-local') {
+      await localDB.query('SET FOREIGN_KEY_CHECKS = 0');
+      try {
+        // Servidor -> Local
+        for (const ubicacion of registrosNuevosEnServer) {
+          await insertarRegistro(ubicacion, localDB, 'local');
+        }
+        for (const ubicacion of registrosActualizadosEnServer) {
+          await actualizarRegistro(ubicacion, localDB, 'local');
+        }
+      } finally {
+        await localDB.query('SET FOREIGN_KEY_CHECKS = 1');
       }
+    }
 
-      // Actualizar registros modificados en el servidor
-      for (const ubicacion of registrosActualizadosEnServer) {
-        await actualizarRegistro(ubicacion);
+    if (direction === 'both' || direction === 'local-to-server') {
+      await serverDB.query('SET FOREIGN_KEY_CHECKS = 0');
+      try {
+        // Local -> Servidor
+        for (const ubicacion of registrosNuevosEnLocal) {
+          await insertarRegistro(ubicacion, serverDB, 'servidor');
+        }
+        for (const ubicacion of registrosActualizadosEnLocal) {
+          await actualizarRegistro(ubicacion, serverDB, 'servidor');
+        }
+      } finally {
+        await serverDB.query('SET FOREIGN_KEY_CHECKS = 1');
       }
-    } finally {
-      await localDB.query('SET FOREIGN_KEY_CHECKS = 1');
     }
 
     // 6. Verificación final
@@ -313,6 +336,13 @@ const sincronizarUbicaciones = async () => {
     const countLocal = countLocalResult[0].count;
     const countServer = countServerResult[0].count;
 
+    console.log(`
+      Resumen de sincronización:
+      - Registros procesados: ${processedCount}
+      - Errores encontrados: ${errorCount}
+      - Total registros en local: ${countLocal}
+      - Total registros en servidor: ${countServer}
+    `);
 
   } catch (error) {
     console.error("Error de sincronización:", error);

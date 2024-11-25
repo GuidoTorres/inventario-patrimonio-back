@@ -1,4 +1,4 @@
-const { Op } = require("sequelize");
+const { Op, Sequelize } = require("sequelize");
 const { getDatabaseConnection } = require("./../../config/config");
 
 const getTrabajadores = async (req, res) => {
@@ -24,11 +24,12 @@ const getTrabajadores = async (req, res) => {
 const postTrabajadores = async (req, res) => {
   try {
     const { models } = await getDatabaseConnection();
-    const { usuario_id, ...otherData } = req.body;
+    const { ...otherData } = req.body;
+    const {usuario_id}= req.query
 
     const usuarioIndex = usuario_id - 3;
-    const rangoInicio = 2000 + ((usuarioIndex - 1) * 100);
-    const rangoFin = rangoInicio + 99;
+    const rangoInicio = 500 + ((usuarioIndex - 1) * 50);
+    const rangoFin = rangoInicio + 49;
 
     // Buscar el último ID usado en el rango del usuario
     const lastId = await models.trabajadores.findOne({
@@ -52,7 +53,6 @@ const postTrabajadores = async (req, res) => {
     const info = {
       id: newId,
       ...otherData,
-      usuario_id,
       estado: "A"
     };
 

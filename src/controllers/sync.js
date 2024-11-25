@@ -26,8 +26,10 @@ async function checkAndSyncIfNeeded(remoteDB, localDB) {
 
     // Comparación detallada de registros
     for (let i = 0; i < remoteSedes.length; i++) {
-      if (remoteSedes[i].id !== localSedes[i].id ||
-        remoteSedes[i].nombre !== localSedes[i].nombre) {
+      if (
+        remoteSedes[i].id !== localSedes[i].id ||
+        remoteSedes[i].nombre !== localSedes[i].nombre
+      ) {
         console.log(`Difference found in sede record: ${remoteSedes[i].id}`);
         return true;
       }
@@ -35,14 +37,13 @@ async function checkAndSyncIfNeeded(remoteDB, localDB) {
 
     console.log("Tables are in sync, no update needed");
     return false;
-
   } catch (error) {
     console.error("Error checking sync status:", error);
     throw error;
   }
 }
 function getLocalDatabaseConnection() {
-  return new Sequelize("inventario_patrimonio5", "root", "root", {
+  return new Sequelize("inventario_patrimonio", "root", "root", {
     host: "localhost",
     dialect: "mysql",
     logging: false,
@@ -50,8 +51,8 @@ function getLocalDatabaseConnection() {
       max: 5,
       min: 0,
       acquire: 30000,
-      idle: 10000
-    }
+      idle: 10000,
+    },
   });
 }
 async function getRemoteDatabaseConnection() {
@@ -65,16 +66,17 @@ async function getRemoteDatabaseConnection() {
     } catch {
       try {
         await remoteDBConnection.close();
-      } catch { }
+      } catch {}
       remoteDBConnection = null;
     }
   }
 
   try {
     console.log("Checking server availability...");
-    const pingOptions = process.platform === 'win32' ?
-      { timeout: 2, extra: ['-n', '1'] } :  // Windows options
-      { timeout: 2, extra: ['-c', '1'] };   // Unix/Mac options
+    const pingOptions =
+      process.platform === "win32"
+        ? { timeout: 2, extra: ["-n", "1"] } // Windows options
+        : { timeout: 2, extra: ["-c", "1"] }; // Unix/Mac options
 
     const isServerUp = await ping.promise.probe(serverHost, pingOptions);
 
@@ -84,17 +86,22 @@ async function getRemoteDatabaseConnection() {
     }
 
     console.log("Creating new remote connection...");
-    remoteDBConnection = new Sequelize("inventario_patrimonio", "usuario", "root", {
-      host: serverHost,
-      dialect: "mysql",
-      logging: false,
-      pool: {
-        max: 5,
-        min: 0,
-        acquire: 30000,
-        idle: 10000
+    remoteDBConnection = new Sequelize(
+      "inventario_patrimonio",
+      "usuario",
+      "root",
+      {
+        host: serverHost,
+        dialect: "mysql",
+        logging: false,
+        pool: {
+          max: 5,
+          min: 0,
+          acquire: 30000,
+          idle: 10000,
+        },
       }
-    });
+    );
 
     await remoteDBConnection.authenticate();
     initModels(remoteDBConnection);
@@ -117,8 +124,9 @@ async function verifyDatabaseConnections() {
     await localDB.authenticate();
     initModels(localDB);
 
-    const [[localInfo]] = await localDB.query('SELECT @@hostname as hostname, DATABASE() as database_name, CONNECTION_ID() as connection_id');
-
+    const [[localInfo]] = await localDB.query(
+      "SELECT @@hostname as hostname, DATABASE() as database_name, CONNECTION_ID() as connection_id"
+    );
   } catch (error) {
     console.error("Local database connection failed:", error);
     throw new Error("Cannot proceed without local database connection");
@@ -131,8 +139,9 @@ async function verifyDatabaseConnections() {
       throw new Error("Could not establish remote connection");
     }
 
-    const [[remoteInfo]] = await remoteDB.query('SELECT @@hostname as hostname, DATABASE() as database_name, CONNECTION_ID() as connection_id');
-
+    const [[remoteInfo]] = await remoteDB.query(
+      "SELECT @@hostname as hostname, DATABASE() as database_name, CONNECTION_ID() as connection_id"
+    );
 
     return { localDB, remoteDB };
   } catch (error) {
@@ -140,8 +149,12 @@ async function verifyDatabaseConnections() {
     throw new Error("Cannot proceed without remote database connection");
   }
 }
-
-async function syncMissingRecords(localDB, remoteDB, missingRecords, localToRemote) {
+async function syncMissingRecords(
+  localDB,
+  remoteDB,
+  missingRecords,
+  localToRemote
+) {
   let totalSynced = 0;
   const errors = [];
 
@@ -149,13 +162,13 @@ async function syncMissingRecords(localDB, remoteDB, missingRecords, localToRemo
     try {
       if (localToRemote) {
         const localRecord = await localDB.models.bienes.findOne({
-          where: { sbn }
+          where: { sbn },
         });
 
         if (localRecord) {
           const recordData = {
             ...localRecord.dataValues,
-            lastSync: new Date()
+            lastSync: new Date(),
           };
           delete recordData.id;
 
@@ -169,13 +182,13 @@ async function syncMissingRecords(localDB, remoteDB, missingRecords, localToRemo
         }
       } else {
         const remoteRecord = await remoteDB.models.bienes.findOne({
-          where: { sbn }
+          where: { sbn },
         });
 
         if (remoteRecord) {
           const recordData = {
             ...remoteRecord.dataValues,
-            lastSync: new Date()
+            lastSync: new Date(),
           };
           delete recordData.id;
 
@@ -197,163 +210,290 @@ async function syncMissingRecords(localDB, remoteDB, missingRecords, localToRemo
   return { totalSynced, errors };
 }
 
+
 async function shouldUpdateRecord(localRecord, remoteRecord) {
-  // Si el local está inventariado y el remoto está null o no inventariado, actualizar
-  if (localRecord.inventariado && (!remoteRecord.inventariado || remoteRecord.inventariado === null)) {
-    return true;
-  }
-
-  const localDate = new Date(localRecord.updatedAt);
-  const remoteDate = new Date(remoteRecord.updatedAt);
-
-  // Solo verificar usuario_id si el remoto está inventariado
-  if (remoteRecord?.inventariado && remoteRecord.usuario_id !== localRecord.usuario_id) {
+  // Si el registro está inventariado en el servidor, nunca actualizarlo
+  if (remoteRecord.inventariado) {
     return false;
   }
 
-  return localDate >= remoteDate;
+  // Si está inventariado localmente, actualizar remoto
+  if (localRecord.inventariado) {
+    return true;
+  }
+
+  // Para registros no inventariados, usar la fecha más reciente
+  const localDate = new Date(localRecord.updatedAt);
+  const remoteDate = new Date(remoteRecord.updatedAt);
+  return localDate > remoteDate;
 }
 
 async function syncLocalToRemote(localDB, remoteDB) {
   try {
     const BATCH_SIZE = 3000;
-
     let offset = 0;
     let totalCreated = 0;
     let totalUpdated = 0;
- 
+    let totalProtected = 0;
+
+    console.log('\nIniciando sincronización Local → Remoto');
+
+    // Obtener todos los registros remotos inventariados para protegerlos
+    const remoteInventariadosInitial = await remoteDB.query(
+      'SELECT sbn FROM bienes WHERE inventariado = true',
+      { 
+        type: Sequelize.QueryTypes.SELECT  // Esto es importante
+      }
+    );
+    
+    // Crear Set con los SNBs inventariados
+    const remoteInventariadosSet = new Set(remoteInventariadosInitial.map(r => r.sbn));
+
     while (true) {
       const bienesLocales = await localDB.models.bienes.findAll({
         limit: BATCH_SIZE,
-        offset
+        offset,
       });
- 
+
       if (!bienesLocales.length) break;
- 
+
+      console.log(`\nProcesando lote de ${bienesLocales.length} registros locales...`);
+
       const remoteRecords = await remoteDB.models.bienes.findAll();
-      const remoteRecordsMap = new Map(remoteRecords.map(r => [r.sbn, r]));
- 
+      const remoteRecordsMap = new Map(remoteRecords.map((r) => [r.sbn, r]));
+
       const recordsToCreate = [];
       const recordsToUpdate = [];
- 
+
       for (const localRecord of bienesLocales) {
         const remoteRecord = remoteRecordsMap.get(localRecord.sbn);
+        
+        // Si el registro está inventariado en el servidor, protegerlo
+        if (remoteInventariadosSet.has(localRecord.sbn)) {
+          totalProtected++;
+          continue;
+        }
+
         const recordData = {
           ...localRecord.dataValues,
           lastSync: new Date(),
-          updatedAt: localRecord.updatedAt
+          updatedAt: localRecord.updatedAt,
         };
         delete recordData.id;
- 
+
+        // Crear solo si no existe en remoto y está inventariado localmente
         if (!remoteRecord && localRecord.inventariado) {
           recordsToCreate.push(recordData);
-        } else if (remoteRecord && await shouldUpdateRecord(localRecord, remoteRecord)) {
+        } 
+        // Actualizar solo si existe en remoto, no está inventariado en remoto,
+        // y cumple con las condiciones de shouldUpdateRecord
+        else if (
+          remoteRecord && 
+          !remoteRecord.inventariado &&
+          await shouldUpdateRecord(localRecord, remoteRecord)
+        ) {
           recordsToUpdate.push({ sbn: localRecord.sbn, data: recordData });
         }
       }
- 
+
       if (recordsToCreate.length) {
-        await remoteDB.models.bienes.bulkCreate(recordsToCreate, { silent: true });
+        await remoteDB.models.bienes.bulkCreate(recordsToCreate, {
+          silent: true,
+        });
         totalCreated += recordsToCreate.length;
+        console.log(`✓ Creados ${recordsToCreate.length} registros en remoto`);
       }
- 
+
       for (const record of recordsToUpdate) {
         await remoteDB.models.bienes.update(record.data, {
-          where: { sbn: record.sbn },
-          silent: true 
+          where: { 
+            sbn: record.sbn,
+            inventariado: false // Asegurar que solo actualiza no inventariados
+          },
+          silent: true,
         });
         totalUpdated++;
       }
- 
+
       offset += BATCH_SIZE;
-      console.log(`Processed ${offset} records...`);
+      console.log(`
+Progreso del lote:
+- Procesados: ${offset}
+- Creados: ${totalCreated}
+- Actualizados: ${totalUpdated}
+- Protegidos (inventariados en remoto): ${totalProtected}
+      `);
     }
- 
-    const [{ count: finalLocalCount }] = await localDB.query('SELECT COUNT(*) as count FROM bienes');
-    const [{ count: finalRemoteCount }] = await remoteDB.query('SELECT COUNT(*) as count FROM bienes');
- 
+
+    // Verificación final
+    const [[{ count: finalLocalCount }]] = await localDB.query(
+      "SELECT COUNT(*) as count FROM bienes"
+    );
+    const [[{ count: finalRemoteCount }]] = await remoteDB.query(
+      "SELECT COUNT(*) as count FROM bienes"
+    );
+
+    // Contar inventariados en ambas bases
+    const [[{ count: localInventariados }]] = await localDB.query(
+      "SELECT COUNT(*) as count FROM bienes WHERE inventariado = true"
+    );
+    const [[{ count: remoteInventariados }]] = await remoteDB.query(
+      "SELECT COUNT(*) as count FROM bienes WHERE inventariado = true"
+    );
+
+    console.log(`
+=== Resumen de sincronización Local → Remoto ===
+✓ Registros creados: ${totalCreated}
+✓ Registros actualizados: ${totalUpdated}
+✓ Registros protegidos: ${totalProtected}
+
+Estadísticas:
+- Total registros en local: ${finalLocalCount}
+- Total registros en remoto: ${finalRemoteCount}
+- Inventariados en local: ${localInventariados}
+- Inventariados en remoto: ${remoteInventariados}
+    `);
+
     return {
       created: totalCreated,
       updated: totalUpdated,
-      finalCounts: { local: finalLocalCount, remote: finalRemoteCount }
+      protected: totalProtected,
+      finalCounts: { local: finalLocalCount, remote: finalRemoteCount },
+      inventariados: { local: localInventariados, remote: remoteInventariados }
     };
+
   } catch (error) {
-    console.error("Sync error:", error);
+    console.error("Error en sincronización Local → Remoto:", error);
     throw error;
   }
- }
- 
- async function syncRemoteToLocal(localDB, remoteDB) {
+}
+
+async function syncRemoteToLocal(localDB, remoteDB) {
   try {
     const BATCH_SIZE = 3000;
- 
     let offset = 0;
     let totalCreated = 0;
     let totalUpdated = 0;
- 
+    let totalProtected = 0;
+
+    console.log('\nIniciando sincronización Remoto → Local');
+
+    // Obtener los SNBs inventariados locales para protección
+    const localInventariados = await localDB.query(
+      'SELECT sbn FROM bienes WHERE inventariado = true',
+      { type: Sequelize.QueryTypes.SELECT }
+    );
+    const localInventariadosSet = new Set(localInventariados.map(r => r.sbn));
+    console.log(`Registros inventariados en local: ${localInventariadosSet.size}`);
+
     while (true) {
       const bienesRemotos = await remoteDB.models.bienes.findAll({
         limit: BATCH_SIZE,
-        offset
+        offset,
+        order: [['updatedAt', 'DESC']]
       });
- 
+
       if (!bienesRemotos.length) break;
- 
+
+      console.log(`\nProcesando lote de ${bienesRemotos.length} registros remotos...`);
+
+      // Obtener registros locales para este lote
       const localRecords = await localDB.models.bienes.findAll();
       const localRecordsMap = new Map(localRecords.map(r => [r.sbn, r]));
- 
-      const recordsToCreate = [];
-      const recordsToUpdate = [];
- 
+
       for (const remoteRecord of bienesRemotos) {
         const localRecord = localRecordsMap.get(remoteRecord.sbn);
-        const recordData = {
-          ...remoteRecord.dataValues,
-          lastSync: new Date(),
-          updatedAt: remoteRecord.updatedAt
-        };
-        delete recordData.id;
- 
-        if (!localRecord) {
-          recordsToCreate.push(recordData);
-        } else if (await shouldUpdateRecord(remoteRecord, localRecord)) {
-          recordsToUpdate.push({ sbn: remoteRecord.sbn, data: recordData });
+
+        // NUNCA sobrescribir registros inventariados localmente
+        if (localRecord?.inventariado) {
+          totalProtected++;
+          continue;
+        }
+
+        try {
+          const recordData = {
+            ...remoteRecord.dataValues,
+            lastSync: new Date()
+          };
+          delete recordData.id;
+
+          // Si no existe en local, crearlo
+          if (!localRecord) {
+            await localDB.models.bienes.create(recordData);
+            totalCreated++;
+            continue;
+          }
+
+          // Si existe pero no está inventariado localmente y el remoto es más reciente
+          if (!localRecord.inventariado && 
+              new Date(remoteRecord.updatedAt) > new Date(localRecord.updatedAt)) {
+            await localDB.models.bienes.update(recordData, {
+              where: { 
+                sbn: remoteRecord.sbn,
+                inventariado: false // Doble verificación
+              }
+            });
+            totalUpdated++;
+          }
+
+        } catch (error) {
+          console.error(`Error procesando ${remoteRecord.sbn}:`, error.message);
         }
       }
- 
-      if (recordsToCreate.length) {
-        await localDB.models.bienes.bulkCreate(recordsToCreate, { silent: true });
-        totalCreated += recordsToCreate.length;
-      }
- 
-      for (const record of recordsToUpdate) {
-        await localDB.models.bienes.update(record.data, {
-          where: { sbn: record.sbn },
-          silent: true
-        });
-        totalUpdated++;
-      }
- 
-      offset += BATCH_SIZE;
-      console.log(`Processed ${offset} records...`);
+
+      offset += bienesRemotos.length;
+      console.log(`
+Progreso del lote:
+- Procesados: ${offset}
+- Creados: ${totalCreated}
+- Actualizados: ${totalUpdated}
+- Protegidos (inventariados local): ${totalProtected}
+      `);
     }
- 
-    const [{ count: finalLocalCount }] = await localDB.query('SELECT COUNT(*) as count FROM bienes');
-    const [{ count: finalRemoteCount }] = await remoteDB.query('SELECT COUNT(*) as count FROM bienes');
- 
+
+    // Verificación final
+    const [[{ count: finalLocalCount }]] = await localDB.query(
+      'SELECT COUNT(*) as count FROM bienes'
+    );
+    const [[{ count: finalRemoteCount }]] = await remoteDB.query(
+      'SELECT COUNT(*) as count FROM bienes'
+    );
+
+    // Verificación de inventariados
+    const [[{ count: totalLocalInventariados }]] = await localDB.query(
+      'SELECT COUNT(*) as count FROM bienes WHERE inventariado = true'
+    );
+    const [[{ count: totalRemoteInventariados }]] = await remoteDB.query(
+      'SELECT COUNT(*) as count FROM bienes WHERE inventariado = true'
+    );
+
+    console.log(`
+=== Resumen de sincronización Remoto → Local ===
+✓ Registros creados: ${totalCreated}
+✓ Registros actualizados: ${totalUpdated}
+✓ Registros protegidos: ${totalProtected}
+
+Estadísticas:
+- Total registros en local: ${finalLocalCount}
+- Total registros en remoto: ${finalRemoteCount}
+- Inventariados en local: ${totalLocalInventariados}
+- Inventariados en remoto: ${totalRemoteInventariados}
+    `);
+
     return {
       created: totalCreated,
       updated: totalUpdated,
+      protected: totalProtected,
       finalCounts: { local: finalLocalCount, remote: finalRemoteCount }
     };
+
   } catch (error) {
-    console.error("Sync error:", error);
+    console.error("\nError en sincronización Remoto → Local:", error);
     throw error;
   }
- }
+}
 async function syncDatabases() {
   try {
-
     const { localDB, remoteDB } = await verifyDatabaseConnections();
 
     // Find missing records in both directions
@@ -368,51 +508,65 @@ async function syncDatabases() {
       )`;
 
     const missingInRemote = await localDB.query(missingInRemoteQuery, {
-      type: Sequelize.QueryTypes.SELECT
+      type: Sequelize.QueryTypes.SELECT,
     });
 
     const missingInLocal = await remoteDB.query(missingInLocalQuery, {
-      type: Sequelize.QueryTypes.SELECT
+      type: Sequelize.QueryTypes.SELECT,
     });
 
     // Handle missing records first
     if (missingInRemote.length > 0) {
       console.log(`Found ${missingInRemote.length} records missing in remote`);
-      await syncMissingRecords(localDB, remoteDB, missingInRemote.map(r => r.sbn), true);
+      await syncMissingRecords(
+        localDB,
+        remoteDB,
+        missingInRemote.map((r) => r.sbn),
+        true
+      );
     }
 
     if (missingInLocal.length > 0) {
       console.log(`Found ${missingInLocal.length} records missing in local`);
-      await syncMissingRecords(localDB, remoteDB, missingInLocal.map(r => r.sbn), false);
+      await syncMissingRecords(
+        localDB,
+        remoteDB,
+        missingInLocal.map((r) => r.sbn),
+        false
+      );
     }
     const needsSync = await checkAndSyncIfNeeded(remoteDB, localDB);
 
     if (needsSync) {
-
-      await syncReferenceTables(remoteDB, localDB)
+      await syncReferenceTables(remoteDB, localDB);
     }
 
     // Then handle updates
-    console.log('\nSyncing local changes to remote...');
+    console.log("\nSyncing local changes to remote...");
     await syncLocalToRemote(localDB, remoteDB);
 
-    console.log('\nSyncing remote changes to local...');
+    console.log("\nSyncing remote changes to local...");
     await syncRemoteToLocal(localDB, remoteDB);
 
     // Final verification
-    const [[{ count: finalLocalCount }]] = await localDB.query('SELECT COUNT(*) as count FROM bienes');
-    const [[{ count: finalRemoteCount }]] = await remoteDB.query('SELECT COUNT(*) as count FROM bienes');
+    const [[{ count: finalLocalCount }]] = await localDB.query(
+      "SELECT COUNT(*) as count FROM bienes"
+    );
+    const [[{ count: finalRemoteCount }]] = await remoteDB.query(
+      "SELECT COUNT(*) as count FROM bienes"
+    );
 
-    console.log('\nFinal record counts:');
+    console.log("\nFinal record counts:");
     console.log(`Local database: ${finalLocalCount} records`);
     console.log(`Remote database: ${finalRemoteCount} records`);
 
     if (finalLocalCount === finalRemoteCount) {
-      console.log('✓ Databases are synchronized');
+      console.log("✓ Databases are synchronized");
     } else {
-      console.log('! Database counts still don\'t match');
+      console.log("! Database counts still don't match");
 
-      const differences = await remoteDB.query(`
+      const differences = await remoteDB.query(
+        `
         SELECT 'missing_in_local' as type, r.sbn 
         FROM bienes r 
         WHERE NOT EXISTS (SELECT 1 FROM bienes l WHERE l.sbn = r.sbn)
@@ -420,12 +574,14 @@ async function syncDatabases() {
         SELECT 'missing_in_remote' as type, l.sbn
         FROM bienes l 
         WHERE NOT EXISTS (SELECT 1 FROM bienes r WHERE r.sbn = l.sbn)
-      `, {
-        type: Sequelize.QueryTypes.SELECT
-      });
+      `,
+        {
+          type: Sequelize.QueryTypes.SELECT,
+        }
+      );
 
       if (differences.length > 0) {
-        console.log('Found differences:', differences);
+        console.log("Found differences:", differences);
       }
     }
   } catch (error) {
@@ -464,17 +620,17 @@ async function syncSedes(remoteDB, localDB) {
   try {
     // 1. Primero obtener todas las sedes remotas
     const remoteSedes = await remoteDB.query(
-      'SELECT * FROM sedes ORDER BY id ASC',
+      "SELECT * FROM sedes ORDER BY id ASC",
       { type: Sequelize.QueryTypes.SELECT }
     );
 
     console.log(`Found ${remoteSedes.length} sedes in remote database`);
 
     // 2. Desactivar temporalmente las restricciones de clave foránea
-    await localDB.query('SET FOREIGN_KEY_CHECKS = 0');
+    await localDB.query("SET FOREIGN_KEY_CHECKS = 0");
 
     // 3. Eliminar todas las sedes locales
-    await localDB.query('TRUNCATE TABLE sedes');
+    await localDB.query("TRUNCATE TABLE sedes");
 
     // 4. Insertar las sedes remotas con sus IDs exactos
     for (const sede of remoteSedes) {
@@ -486,41 +642,40 @@ async function syncSedes(remoteDB, localDB) {
             id: sede.id,
             nombre: sede.nombre,
             createdAt: sede.createdAt,
-            updatedAt: sede.updatedAt
-          }
+            updatedAt: sede.updatedAt,
+          },
         }
       );
       console.log(`Inserted sede ID: ${sede.id} - ${sede.nombre}`);
     }
 
     // 5. Reactivar las restricciones de clave foránea
-    await localDB.query('SET FOREIGN_KEY_CHECKS = 1');
+    await localDB.query("SET FOREIGN_KEY_CHECKS = 1");
 
     // 6. Verificar la sincronización
     const [localSedes] = await localDB.query(
-      'SELECT * FROM sedes ORDER BY id ASC'
+      "SELECT * FROM sedes ORDER BY id ASC"
     );
 
-    console.log('\nVerification:');
+    console.log("\nVerification:");
     console.log(`Remote sedes: ${remoteSedes.length}`);
     console.log(`Local sedes: ${localSedes.length}`);
 
     if (remoteSedes.length === localSedes.length) {
-      console.log('✓ Sedes synchronized successfully');
+      console.log("✓ Sedes synchronized successfully");
     } else {
-      console.log('! Warning: Sede counts don\'t match');
+      console.log("! Warning: Sede counts don't match");
     }
 
     // Mostrar algunas sedes para verificación
-    console.log('\nSample of synchronized sedes:');
-    remoteSedes.slice(0, 5).forEach(sede => {
+    console.log("\nSample of synchronized sedes:");
+    remoteSedes.slice(0, 5).forEach((sede) => {
       console.log(`ID: ${sede.id}, Nombre: ${sede.nombre}`);
     });
-
   } catch (error) {
     console.error("Error syncing sedes:", error);
     // Asegurarse de reactivar las restricciones de clave foránea en caso de error
-    await localDB.query('SET FOREIGN_KEY_CHECKS = 1');
+    await localDB.query("SET FOREIGN_KEY_CHECKS = 1");
     throw error;
   }
 }
@@ -529,26 +684,28 @@ async function syncDependencias(remoteDB, localDB) {
   try {
     // 1. Obtener dependencias remotas
     const remoteDependencias = await remoteDB.query(
-      'SELECT * FROM dependencias ORDER BY id ASC',
+      "SELECT * FROM dependencias ORDER BY id ASC",
       {
-        type: Sequelize.QueryTypes.SELECT  // Esto es importante para obtener el array directamente
+        type: Sequelize.QueryTypes.SELECT, // Esto es importante para obtener el array directamente
       }
     );
 
-    console.log(`Found ${remoteDependencias.length} dependencias in remote database`);
+    console.log(
+      `Found ${remoteDependencias.length} dependencias in remote database`
+    );
 
     // Debug: Mostrar algunas dependencias remotas
-    console.log('\nSample remote dependencias:');
-    remoteDependencias.slice(0, 3).forEach(dep => {
+    console.log("\nSample remote dependencias:");
+    remoteDependencias.slice(0, 3).forEach((dep) => {
       console.log(`ID: ${dep.id}, Nombre: ${dep.nombre}, Sede: ${dep.sede_id}`);
     });
 
     // 2. Desactivar foreign key checks
-    await localDB.query('SET FOREIGN_KEY_CHECKS = 0');
+    await localDB.query("SET FOREIGN_KEY_CHECKS = 0");
 
     try {
       // 3. Limpiar tabla local
-      await localDB.query('TRUNCATE TABLE dependencias');
+      await localDB.query("TRUNCATE TABLE dependencias");
 
       // 4. Insertar todas las dependencias
       for (const dep of remoteDependencias) {
@@ -564,8 +721,8 @@ async function syncDependencias(remoteDB, localDB) {
               tipo_ubicac: dep.tipo_ubicac || null,
               ubicac_fisica: dep.ubicac_fisica || null,
               createdAt: dep.createdAt,
-              updatedAt: dep.updatedAt
-            }
+              updatedAt: dep.updatedAt,
+            },
           }
         );
         console.log(`Inserted dependencia ID: ${dep.id} - ${dep.nombre}`);
@@ -573,30 +730,30 @@ async function syncDependencias(remoteDB, localDB) {
 
       // 5. Verificar la sincronización
       const localDependencias = await localDB.query(
-        'SELECT * FROM dependencias ORDER BY id ASC',
+        "SELECT * FROM dependencias ORDER BY id ASC",
         { type: Sequelize.QueryTypes.SELECT }
       );
 
-      console.log('\nVerification:');
+      console.log("\nVerification:");
       console.log(`Remote dependencias: ${remoteDependencias.length}`);
       console.log(`Local dependencias: ${localDependencias.length}`);
 
       // Mostrar algunas dependencias locales
-      console.log('\nSample local dependencias after sync:');
-      localDependencias.slice(0, 3).forEach(dep => {
-        console.log(`ID: ${dep.id}, Nombre: ${dep.nombre}, Sede: ${dep.sede_id}`);
+      console.log("\nSample local dependencias after sync:");
+      localDependencias.slice(0, 3).forEach((dep) => {
+        console.log(
+          `ID: ${dep.id}, Nombre: ${dep.nombre}, Sede: ${dep.sede_id}`
+        );
       });
-
     } finally {
       // Reactivar foreign key checks
-      await localDB.query('SET FOREIGN_KEY_CHECKS = 1');
+      await localDB.query("SET FOREIGN_KEY_CHECKS = 1");
     }
-
   } catch (error) {
     console.error("Error syncing dependencias:", error);
     console.error("Full error:", error.message);
     // Asegurar que se reactivan las foreign key checks en caso de error
-    await localDB.query('SET FOREIGN_KEY_CHECKS = 1');
+    await localDB.query("SET FOREIGN_KEY_CHECKS = 1");
     throw error;
   }
 }
@@ -617,9 +774,9 @@ async function updateBienesReferences(remoteDB, localDB) {
         {
           replacements: {
             newSedeId: sede.id,
-            oldSedeId: sede.id
+            oldSedeId: sede.id,
           },
-          type: Sequelize.QueryTypes.UPDATE
+          type: Sequelize.QueryTypes.UPDATE,
         }
       );
       console.log(`Updated bienes for sede ID: ${sede.id}`);
@@ -631,8 +788,5 @@ async function updateBienesReferences(remoteDB, localDB) {
     throw error;
   }
 }
-
-
-
 
 module.exports = { syncDatabases };

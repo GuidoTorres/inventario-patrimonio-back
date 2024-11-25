@@ -6,7 +6,7 @@ module.exports = (sequelize, DataTypes) => {
 
     id: {
       allowNull: false,
-      autoIncrement: true,
+      autoIncrement: false,
       primaryKey: true,
       type: DataTypes.INTEGER
     },
@@ -15,7 +15,7 @@ module.exports = (sequelize, DataTypes) => {
     updatedAt: DataTypes.DATE,
     dependencia_id: DataTypes.INTEGER,
     tipo_ubicac: DataTypes.STRING,
-    ubicac_fisica: DataTypes.STRING
+    ubicac_fisica: DataTypes.STRING,
 
   }, { timestamps: true, tableName: "ubicaciones", freezeTableName: true })
 
