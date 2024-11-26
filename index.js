@@ -113,15 +113,15 @@ async function startServer() {
     
     server.listen(3006, () => {
       console.log(`Server running on port: 3006`);
-      openBrowserManually()
+      // openBrowserManually()
     });
 
     // Cron job for synchronization
     cron.schedule("* * * * *", async () => {
       try {
-        // await syncDatabases();
+        await syncDatabases();
         await SigaDB()
-        await sincronizarTodo()
+        // await sincronizarTodo()
       } catch (error) {
         console.error("Synchronization error:", error.message);
       }

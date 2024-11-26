@@ -43,7 +43,7 @@ async function checkAndSyncIfNeeded(remoteDB, localDB) {
   }
 }
 function getLocalDatabaseConnection() {
-  return new Sequelize("inventario_patrimonio", "root", "root", {
+  return new Sequelize("inventario_patrimonio5", "root", "root", {
     host: "localhost",
     dialect: "mysql",
     logging: false,
@@ -570,110 +570,94 @@ Estadísticas:
 async function syncDatabases() {
   try {
     const { localDB, remoteDB } = await verifyDatabaseConnections();
+    console.log("Iniciando sincronización completa...");
 
-    // Find missing records in both directions
-    const missingInRemoteQuery = `
-      SELECT l.sbn FROM bienes l WHERE NOT EXISTS (
-        SELECT 1 FROM bienes r WHERE r.sbn = l.sbn
-      )`;
-
-    const missingInLocalQuery = `
-      SELECT r.sbn FROM bienes r WHERE NOT EXISTS (
-        SELECT 1 FROM bienes l WHERE l.sbn = r.sbn
-      )`;
-
-    const missingInRemote = await localDB.query(missingInRemoteQuery, {
-      type: Sequelize.QueryTypes.SELECT,
-    });
-
-    const missingInLocal = await remoteDB.query(missingInLocalQuery, {
-      type: Sequelize.QueryTypes.SELECT,
-    });
-
-    // Handle missing records first
-    if (missingInRemote.length > 0) {
-      console.log(`Found ${missingInRemote.length} records missing in remote`);
-      await syncMissingRecords(
-        localDB,
-        remoteDB,
-        missingInRemote.map((r) => r.sbn),
-        true
-      );
-    }
-
-    if (missingInLocal.length > 0) {
-      console.log(`Found ${missingInLocal.length} records missing in local`);
-      await syncMissingRecords(
-        localDB,
-        remoteDB,
-        missingInLocal.map((r) => r.sbn),
-        false
-      );
-    }
-    const needsSync = await checkAndSyncIfNeeded(remoteDB, localDB);
-
-    if (needsSync) {
-      await syncReferenceTables(remoteDB, localDB);
-    }
-
-    // Then handle updates
-    console.log("\nSyncing local changes to remote...");
-    await syncLocalToRemote(localDB, remoteDB);
-
-    console.log("\nSyncing remote changes to local...");
-    await syncRemoteToLocal(localDB, remoteDB);
-
-    // Final verification
-    const [[{ count: finalLocalCount }]] = await localDB.query(
-      "SELECT COUNT(*) as count FROM bienes"
+    // 1. Verificar cantidad inicial de inventariados
+    const [[{ count: localInventariadosInicial }]] = await localDB.query(
+      'SELECT COUNT(*) as count FROM bienes WHERE inventariado = true'
     );
-    const [[{ count: finalRemoteCount }]] = await remoteDB.query(
-      "SELECT COUNT(*) as count FROM bienes"
+
+    const [[{ count: remoteInventariadosInicial }]] = await remoteDB.query(
+      'SELECT COUNT(*) as count FROM bienes WHERE inventariado = true'
     );
-    const usuariosTotal = await localDB.query('SELECT DISTINCT usuario_id FROM bienes WHERE usuario_id IS NOT NULL');
-    for (const { usuario_id } of usuariosTotal) {
-      await validateUserInventory(localDB, remoteDB, usuario_id);
-    }
 
-    // Final status output
-    console.log(`\nFinal counts after user inventory validation:`);
-    console.log(`Local database: ${finalLocalCount} records`);
-    console.log(`Remote database: ${finalRemoteCount} records`);
+    console.log(`Inventariados iniciales - Local: ${localInventariadosInicial}, Remoto: ${remoteInventariadosInicial}`);
 
-    console.log("\nFinal record counts:");
-    console.log(`Local database: ${finalLocalCount} records`);
-    console.log(`Remote database: ${finalRemoteCount} records`);
+    // 2. Obtener SNBs inventariados
+    const localInventariados = await localDB.query(
+      'SELECT sbn FROM bienes WHERE inventariado = true',
+      { type: Sequelize.QueryTypes.SELECT }
+    );
 
-    if (finalLocalCount === finalRemoteCount) {
-      console.log("✓ Databases are synchronized");
-    } else {
-      console.log("! Database counts still don't match");
+    const remoteInventariados = await remoteDB.query(
+      'SELECT sbn FROM bienes WHERE inventariado = true',
+      { type: Sequelize.QueryTypes.SELECT }
+    );
 
-      const differences = await remoteDB.query(
-        `
-        SELECT 'missing_in_local' as type, r.sbn 
-        FROM bienes r 
-        WHERE NOT EXISTS (SELECT 1 FROM bienes l WHERE l.sbn = r.sbn)
-        UNION ALL
-        SELECT 'missing_in_remote' as type, l.sbn
-        FROM bienes l 
-        WHERE NOT EXISTS (SELECT 1 FROM bienes r WHERE r.sbn = l.sbn)
-      `,
+    // Crear conjuntos de SNBs inventariados
+    const localInventariadosSet = new Set(localInventariados.map(r => r.sbn));
+    const remoteInventariadosSet = new Set(remoteInventariados.map(r => r.sbn));
+
+    // 3. Unir todos los SNBs inventariados
+    const allInventariadosSBNs = new Set([...localInventariadosSet, ...remoteInventariadosSet]);
+    console.log(`Total de SNBs inventariados únicos: ${allInventariadosSBNs.size}`);
+
+    // 4. Actualizar en lotes
+    const BATCH_SIZE = 1000;
+    const inventariadosSBNsArray = Array.from(allInventariadosSBNs);
+
+    for (let i = 0; i < inventariadosSBNsArray.length; i += BATCH_SIZE) {
+      const batch = inventariadosSBNsArray.slice(i, i + BATCH_SIZE);
+      
+      // Actualizar en local
+      await localDB.query(
+        'UPDATE bienes SET inventariado = true WHERE sbn IN (?)',
         {
-          type: Sequelize.QueryTypes.SELECT,
+          replacements: [batch],
+          type: Sequelize.QueryTypes.UPDATE
         }
       );
 
-      if (differences.length > 0) {
-        console.log("Found differences:", differences);
-      }
+      // Actualizar en remoto
+      await remoteDB.query(
+        'UPDATE bienes SET inventariado = true WHERE sbn IN (?)',
+        {
+          replacements: [batch],
+          type: Sequelize.QueryTypes.UPDATE
+        }
+      );
+
+      console.log(`Procesado lote ${Math.floor(i/BATCH_SIZE) + 1} de ${Math.ceil(inventariadosSBNsArray.length/BATCH_SIZE)}`);
     }
-    const usuarios = await localDB.query('SELECT DISTINCT usuario_id FROM bienes WHERE usuario_id IS NOT NULL');
-    for (const { usuario_id } of usuarios) {
-      await validateUserInventory(localDB, remoteDB);
+
+    // 5. Verificación final
+    const [[{ count: localInventariadosFinal }]] = await localDB.query(
+      'SELECT COUNT(*) as count FROM bienes WHERE inventariado = true'
+    );
+
+    const [[{ count: remoteInventariadosFinal }]] = await remoteDB.query(
+      'SELECT COUNT(*) as count FROM bienes WHERE inventariado = true'
+    );
+
+    console.log('\n=== Resumen de sincronización de inventario ===');
+    console.log(`Inventariados iniciales en local: ${localInventariadosInicial}`);
+    console.log(`Inventariados iniciales en remoto: ${remoteInventariadosInicial}`);
+    console.log(`Inventariados finales en local: ${localInventariadosFinal}`);
+    console.log(`Inventariados finales en remoto: ${remoteInventariadosFinal}`);
+
+    if (localInventariadosFinal !== remoteInventariadosFinal) {
+      throw new Error('La sincronización de inventario no igualó las bases de datos');
     }
+
+    if (localInventariadosFinal < Math.max(localInventariadosInicial, remoteInventariadosInicial)) {
+      throw new Error('Se perdieron registros inventariados durante la sincronización');
+    }
+
+    console.log('\n✓ Sincronización de inventario completada exitosamente');
+
   } catch (error) {
-    console.error("Synchronization error:", error);
+    console.error("Error en sincronización:", error);
+    throw error;
   } finally {
     if (remoteDBConnection) {
       await remoteDBConnection.close();

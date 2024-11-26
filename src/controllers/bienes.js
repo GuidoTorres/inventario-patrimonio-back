@@ -457,13 +457,12 @@ const sedesPorTrabajador = async (req, res) => {
   try {
     const { models } = await getDatabaseConnection();
     const dniTrabajador = req.query.dni; // DNI del trabajador seleccionado
-    const usuario = req.query.usuario
-    console.log(usuario);
+
 
 
     // Buscar las ubicaciones, dependencias y sedes relacionadas con los bienes del trabajador
     const bienes = await models.bienes.findAll({
-      where: { dni: dniTrabajador, inventariado: true, usuario_id: usuario },
+      where: { dni: dniTrabajador, inventariado: true },
       attributes: [], // No necesitamos los atributos de la tabla de bienes
       include: [
         {
@@ -615,7 +614,7 @@ const bienesPorTrabajador = async (req, res) => {
           attributes: ["nombre"],
         },
         {
-          model: models.usuarios, where: { id: usuarioId },
+          model: models.usuarios, 
           include: [
             { model: models.inventariadores, attributes: ["nombre"] },
             { model: models.jefes, include: [{ model: models.grupos }] },
@@ -938,11 +937,11 @@ const getEstadisticasBiens = async (req, res) => {
     });
     const activos = await models.bienes.count({
       attributes: { exclude: ["trabajador_id"] },
-      where: { tipo: "activo" },
+      where: { tipo: "activo", inventariado: true },
     });
     const sobrantes = await models.bienes.count({
       attributes: { exclude: ["trabajador_id"] },
-      where: { tipo: "sobrante" },
+      where: { tipo: "sobrante", inventariado: true },
     });
     const faltantes = await models.bienes.count({
       attributes: { exclude: ["trabajador_id"] },
