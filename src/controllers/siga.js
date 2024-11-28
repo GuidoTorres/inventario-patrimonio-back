@@ -42,7 +42,7 @@ const SigaDB = async () => {
       logging: false
     });
 
-    const localDB = new Sequelize("inventario_patrimonio5", "root", "root", {
+    const localDB = new Sequelize("inventario_patrimonio", "root", "root", {
       host: "localhost",
       dialect: "mysql",
       logging: false

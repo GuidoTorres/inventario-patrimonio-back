@@ -954,7 +954,7 @@ const getEstadisticasBiens = async (req, res) => {
       sobrantes,
       activos,
       faltantes: faltantes,
-      faltan: total - inventariados,
+      faltan: total - (activos + sobrantes),
     };
 
     // Devolver la información del bien con la URL de la imagen
