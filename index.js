@@ -5,14 +5,15 @@ const cors = require("cors");
 const http = require("http");
 const socketIo = require("socket.io");
 const routerApi = require("./src/routes");
-const { initializeDatabase } = require("./config/config");
+const { initializeDatabase, alterTable } = require("./config/config");
 const path = require("path");
 const cron = require("node-cron");
 const { syncDatabases } = require("./src/controllers/sync");
 const { SigaDB } = require("./src/controllers/siga");
 const { exec } = require('child_process');
 const { sincronizarUbicaciones } = require("./src/controllers/ubicaciones");
-const { sincronizarTodo } = require("./src/controllers/sincronizarTablas");
+const { sincronizarTodo, compararApartirDeId } = require("./src/controllers/sincronizarTablas");
+const { getSigaToDB } = require("./src/controllers/bienes");
 
 const app = express();
 const server = http.createServer(app);
@@ -119,9 +120,11 @@ async function startServer() {
     // Cron job for synchronization
     cron.schedule("* * * * *", async () => {
       try {
-        await syncDatabases();
         await SigaDB()
-        // await sincronizarTodo()
+        await getSigaToDB()
+        await sincronizarTodo()
+        await syncDatabases();
+        // await alterTable()
       } catch (error) {
         console.error("Synchronization error:", error.message);
       }

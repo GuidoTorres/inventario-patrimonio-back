@@ -6,7 +6,7 @@ const initModels = require("../../app/models/init_models");
 let remoteDBConnection = null;
 
 function getLocalDatabaseConnection() {
-  return new Sequelize("inventario_patrimonio5", "root", "root", {
+  return new Sequelize("inventario_patrimonio", "root", "root", {
     host: "localhost",
     dialect: "mysql",
     logging: false,
@@ -29,7 +29,7 @@ async function getRemoteDatabaseConnection() {
     } catch {
       try {
         await remoteDBConnection.close();
-      } catch { }
+      } catch {}
       remoteDBConnection = null;
     }
   }
@@ -112,18 +112,17 @@ async function verifyDatabaseConnections() {
     throw new Error("Cannot proceed without remote database connection");
   }
 }
-
 async function syncDatabases() {
   try {
     const { localDB, remoteDB } = await verifyDatabaseConnections();
     console.log("Iniciando sincronización completa...");
 
     // 1. Obtener todos los registros de ambas bases
-    const localRecords = await localDB.query('SELECT * FROM bienes', {
+    const localRecords = await localDB.query("SELECT * FROM bienes", {
       type: Sequelize.QueryTypes.SELECT,
     });
 
-    const remoteRecords = await remoteDB.query('SELECT * FROM bienes', {
+    const remoteRecords = await remoteDB.query("SELECT * FROM bienes", {
       type: Sequelize.QueryTypes.SELECT,
     });
 
@@ -134,7 +133,7 @@ async function syncDatabases() {
     // 2. Sincronizar registros nuevos de local a remoto
     for (const localRecord of localRecords) {
       if (!remoteMap.has(localRecord.sbn)) {
-        // Insertar nuevo registro
+        // Insertar nuevo registro en remoto
         await remoteDB.query(
           `INSERT INTO bienes 
            (sbn, descripcion, marca, modelo, serie, color, estado, situacion, sede_id, 
@@ -143,12 +142,30 @@ async function syncDatabases() {
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           {
             replacements: [
-              localRecord.sbn, localRecord.descripcion, localRecord.marca, localRecord.modelo, localRecord.serie,
-              localRecord.color, localRecord.estado, localRecord.situacion, localRecord.sede_id, localRecord.ubicacion_id,
-              localRecord.dependencia_id, localRecord.dni, localRecord.estado_patrimonial, localRecord.fecha_registro,
-              localRecord.inventariado, localRecord.createdAt, localRecord.updatedAt, localRecord.foto,
-              localRecord.detalles, localRecord.usuario_id, localRecord.tipo, localRecord.secuencia,
-              localRecord.observacion, new Date() // lastSync
+              localRecord.sbn,
+              localRecord.descripcion,
+              localRecord.marca,
+              localRecord.modelo,
+              localRecord.serie,
+              localRecord.color,
+              localRecord.estado,
+              localRecord.situacion,
+              localRecord.sede_id,
+              localRecord.ubicacion_id,
+              localRecord.dependencia_id,
+              localRecord.dni,
+              localRecord.estado_patrimonial,
+              localRecord.fecha_registro,
+              localRecord.inventariado,
+              localRecord.createdAt,
+              localRecord.updatedAt,
+              localRecord.foto,
+              localRecord.detalles,
+              localRecord.usuario_id,
+              localRecord.tipo,
+              localRecord.secuencia,
+              localRecord.observacion,
+              new Date(), // lastSync
             ],
             type: Sequelize.QueryTypes.INSERT,
           }
@@ -159,7 +176,7 @@ async function syncDatabases() {
     // 3. Sincronizar registros nuevos de remoto a local
     for (const remoteRecord of remoteRecords) {
       if (!localMap.has(remoteRecord.sbn)) {
-        // Insertar nuevo registro
+        // Insertar nuevo registro en local
         await localDB.query(
           `INSERT INTO bienes 
            (sbn, descripcion, marca, modelo, serie, color, estado, situacion, sede_id, 
@@ -168,12 +185,30 @@ async function syncDatabases() {
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           {
             replacements: [
-              remoteRecord.sbn, remoteRecord.descripcion, remoteRecord.marca, remoteRecord.modelo, remoteRecord.serie,
-              remoteRecord.color, remoteRecord.estado, remoteRecord.situacion, remoteRecord.sede_id, remoteRecord.ubicacion_id,
-              remoteRecord.dependencia_id, remoteRecord.dni, remoteRecord.estado_patrimonial, remoteRecord.fecha_registro,
-              remoteRecord.inventariado, remoteRecord.createdAt, remoteRecord.updatedAt, remoteRecord.foto,
-              remoteRecord.detalles, remoteRecord.usuario_id, remoteRecord.tipo, remoteRecord.secuencia,
-              remoteRecord.observacion, new Date() // lastSync
+              remoteRecord.sbn,
+              remoteRecord.descripcion,
+              remoteRecord.marca,
+              remoteRecord.modelo,
+              remoteRecord.serie,
+              remoteRecord.color,
+              remoteRecord.estado,
+              remoteRecord.situacion,
+              remoteRecord.sede_id,
+              remoteRecord.ubicacion_id,
+              remoteRecord.dependencia_id,
+              remoteRecord.dni,
+              remoteRecord.estado_patrimonial,
+              remoteRecord.fecha_registro,
+              remoteRecord.inventariado,
+              remoteRecord.createdAt,
+              remoteRecord.updatedAt,
+              remoteRecord.foto,
+              remoteRecord.detalles,
+              remoteRecord.usuario_id,
+              remoteRecord.tipo,
+              remoteRecord.secuencia,
+              remoteRecord.observacion,
+              new Date(), // lastSync
             ],
             type: Sequelize.QueryTypes.INSERT,
           }
@@ -186,17 +221,11 @@ async function syncDatabases() {
       const remoteRecord = remoteMap.get(localRecord.sbn);
 
       if (remoteRecord) {
-        // Determinar qué registro actualizar basado en updatedAt
-        // Dar prioridad a registros inventariados
-        const shouldUpdateRemote = 
-          (localRecord.inventariado && !remoteRecord.inventariado) || 
-          (localRecord.updatedAt > remoteRecord.updatedAt && !remoteRecord.inventariado);
-        
-        const shouldUpdateLocal = 
-          (remoteRecord.inventariado && !localRecord.inventariado) || 
-          (remoteRecord.updatedAt > localRecord.updatedAt && !localRecord.inventariado);
+        const localUpdatedAt = new Date(localRecord.updatedAt);
+        const remoteUpdatedAt = new Date(remoteRecord.updatedAt);
 
-        if (shouldUpdateRemote) {
+        if (localUpdatedAt > remoteUpdatedAt) {
+          // Local es más reciente, actualizar remoto
           await remoteDB.query(
             `UPDATE bienes 
              SET descripcion = ?, marca = ?, modelo = ?, serie = ?, color = ?, estado = ?, 
@@ -207,20 +236,35 @@ async function syncDatabases() {
              WHERE sbn = ?`,
             {
               replacements: [
-                localRecord.descripcion, localRecord.marca, localRecord.modelo, localRecord.serie, localRecord.color,
-                localRecord.estado, localRecord.situacion, localRecord.sede_id, localRecord.ubicacion_id,
-                localRecord.dependencia_id, localRecord.dni, localRecord.estado_patrimonial, localRecord.fecha_registro,
-                true, // Forzar inventariado si ya estaba inventariado
-                localRecord.updatedAt, localRecord.foto, localRecord.detalles,
-                localRecord.usuario_id, localRecord.tipo, localRecord.secuencia, localRecord.observacion,
-                new Date(), localRecord.sbn
+                localRecord.descripcion,
+                localRecord.marca,
+                localRecord.modelo,
+                localRecord.serie,
+                localRecord.color,
+                localRecord.estado,
+                localRecord.situacion,
+                localRecord.sede_id,
+                localRecord.ubicacion_id,
+                localRecord.dependencia_id,
+                localRecord.dni,
+                localRecord.estado_patrimonial,
+                localRecord.fecha_registro,
+                localRecord.inventariado,
+                localRecord.updatedAt,
+                localRecord.foto,
+                localRecord.detalles,
+                localRecord.usuario_id,
+                localRecord.tipo,
+                localRecord.secuencia,
+                localRecord.observacion,
+                new Date(),
+                localRecord.sbn,
               ],
               type: Sequelize.QueryTypes.UPDATE,
             }
           );
-        }
-
-        if (shouldUpdateLocal) {
+        } else if (remoteUpdatedAt > localUpdatedAt) {
+          // Remoto es más reciente, actualizar local
           await localDB.query(
             `UPDATE bienes 
              SET descripcion = ?, marca = ?, modelo = ?, serie = ?, color = ?, estado = ?, 
@@ -231,28 +275,115 @@ async function syncDatabases() {
              WHERE sbn = ?`,
             {
               replacements: [
-                remoteRecord.descripcion, remoteRecord.marca, remoteRecord.modelo, remoteRecord.serie, remoteRecord.color,
-                remoteRecord.estado, remoteRecord.situacion, remoteRecord.sede_id, remoteRecord.ubicacion_id,
-                remoteRecord.dependencia_id, remoteRecord.dni, remoteRecord.estado_patrimonial, remoteRecord.fecha_registro,
-                true, // Forzar inventariado si ya estaba inventariado
-                remoteRecord.updatedAt, remoteRecord.foto, remoteRecord.detalles,
-                remoteRecord.usuario_id, remoteRecord.tipo, remoteRecord.secuencia, remoteRecord.observacion,
-                new Date(), remoteRecord.sbn
+                remoteRecord.descripcion,
+                remoteRecord.marca,
+                remoteRecord.modelo,
+                remoteRecord.serie,
+                remoteRecord.color,
+                remoteRecord.estado,
+                remoteRecord.situacion,
+                remoteRecord.sede_id,
+                remoteRecord.ubicacion_id,
+                remoteRecord.dependencia_id,
+                remoteRecord.dni,
+                remoteRecord.estado_patrimonial,
+                remoteRecord.fecha_registro,
+                remoteRecord.inventariado,
+                remoteRecord.updatedAt,
+                remoteRecord.foto,
+                remoteRecord.detalles,
+                remoteRecord.usuario_id,
+                remoteRecord.tipo,
+                remoteRecord.secuencia,
+                remoteRecord.observacion,
+                new Date(),
+                remoteRecord.sbn,
               ],
               type: Sequelize.QueryTypes.UPDATE,
             }
           );
+        } else {
+          // localUpdatedAt === remoteUpdatedAt
+          if (localRecord.inventariado !== remoteRecord.inventariado) {
+            if (localRecord.inventariado === true || remoteRecord.inventariado === true) {
+              // Si uno de los dos es true, sincronizamos a true en ambos
+              await remoteDB.query(
+                `UPDATE bienes 
+                 SET inventariado = ?, updatedAt = ?, lastSync = ?
+                 WHERE sbn = ?`,
+                {
+                  replacements: [
+                    true,
+                    new Date(),
+                    new Date(),
+                    localRecord.sbn,
+                  ],
+                  type: Sequelize.QueryTypes.UPDATE,
+                }
+              );
+              await localDB.query(
+                `UPDATE bienes 
+                 SET inventariado = ?, updatedAt = ?, lastSync = ?
+                 WHERE sbn = ?`,
+                {
+                  replacements: [
+                    true,
+                    new Date(),
+                    new Date(),
+                    remoteRecord.sbn,
+                  ],
+                  type: Sequelize.QueryTypes.UPDATE,
+                }
+              );
+            } else {
+              // Si uno de los dos es false o null, sincronizamos a false en ambos
+              await remoteDB.query(
+                `UPDATE bienes 
+                 SET inventariado = ?, updatedAt = ?, lastSync = ?
+                 WHERE sbn = ?`,
+                {
+                  replacements: [
+                    false,
+                    new Date(),
+                    new Date(),
+                    localRecord.sbn,
+                  ],
+                  type: Sequelize.QueryTypes.UPDATE,
+                }
+              );
+              await localDB.query(
+                `UPDATE bienes 
+                 SET inventariado = ?, updatedAt = ?, lastSync = ?
+                 WHERE sbn = ?`,
+                {
+                  replacements: [
+                    false,
+                    new Date(),
+                    new Date(),
+                    remoteRecord.sbn,
+                  ],
+                  type: Sequelize.QueryTypes.UPDATE,
+                }
+              );
+            }
+          }
         }
       }
     }
 
     // 5. Resumen final
-    const finalLocal = await localDB.query('SELECT COUNT(*) AS count FROM bienes WHERE inventariado = true', {
-      type: Sequelize.QueryTypes.SELECT,
-    });
-    const finalRemote = await remoteDB.query('SELECT COUNT(*) AS count FROM bienes WHERE inventariado = true', {
-      type: Sequelize.QueryTypes.SELECT,
-    });
+    const finalLocal = await localDB.query(
+      "SELECT COUNT(*) AS count FROM bienes WHERE inventariado = true",
+      {
+        type: Sequelize.QueryTypes.SELECT,
+      }
+    );
+    const finalRemote = await remoteDB.query(
+      "SELECT COUNT(*) AS count FROM bienes WHERE inventariado = true",
+      {
+        type: Sequelize.QueryTypes.SELECT,
+      }
+    );
 
     console.log(`
       Resumen de sincronización:
@@ -260,15 +391,11 @@ async function syncDatabases() {
       - Registros inventariados en remoto: ${finalRemote[0].count}
     `);
 
-    console.log('Sincronización completa.');
+    console.log("Sincronización completa.");
   } catch (error) {
     console.error("Error durante la sincronización:", error);
   }
 }
-
-
-
-
 
 
 module.exports = { syncDatabases };

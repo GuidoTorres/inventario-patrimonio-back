@@ -24,6 +24,18 @@ const TABLE_CONFIGS = {
         'createdAt',
         'updatedAt'
       ]
+    },
+    dependencias: {
+      tableName: 'dependencias',
+      columns: [
+        'id',
+        'tipo_ubicac',
+        'ubicac_fisica',
+        'nombre',
+        'sede_id',
+        'createdAt',
+        'updatedAt'
+      ]
     }
   };
   
@@ -45,42 +57,34 @@ const TABLE_CONFIGS = {
       logging: false
     }
   };
-  
-  const sincronizarTabla = async (
-    tableConfig,
-    localDB,
-    serverDB,
-    direction = 'server-to-local'
-  ) => {
+
+  const sincronizarTabla = async (tableConfig, localDB, serverDB, direction = 'both') => {
     const { tableName, columns } = tableConfig;
     let processedCount = 0;
     let errorCount = 0;
   
     try {
-      // 1. Construir la consulta SQL usando las columnas configuradas
       const selectQuery = `
         SELECT ${columns.join(', ')}
         FROM ${tableName}
         ORDER BY id ASC
       `;
   
-      // 2. Obtener datos de ambas bases de datos
       const [registrosLocal, registrosServer] = await Promise.all([
         localDB.query(selectQuery, { type: QueryTypes.SELECT }),
         serverDB.query(selectQuery, { type: QueryTypes.SELECT })
       ]);
   
       console.log(`
-  ✓ Registros encontrados en ${tableName}:
-    → Local: ${registrosLocal.length}
-    → Servidor: ${registrosServer.length}
+    ✓ Registros encontrados en ${tableName}:
+      → Local: ${registrosLocal.length}
+      → Servidor: ${registrosServer.length}
       `);
   
-      // 3. Crear mapas por ID
       const localMap = new Map(registrosLocal.map(r => [r.id, r]));
       const serverMap = new Map(registrosServer.map(r => [r.id, r]));
   
-      // 4. Encontrar diferencias
+      // Obtener registros nuevos y actualizados
       const registrosNuevosEnServer = registrosServer.filter(r => !localMap.has(r.id));
       const registrosActualizadosEnServer = registrosServer.filter(r => {
         const localReg = localMap.get(r.id);
@@ -96,32 +100,27 @@ const TABLE_CONFIGS = {
       });
   
       console.log(`
-  ✓ Análisis de ${tableName}:
-    → Nuevos en servidor: ${registrosNuevosEnServer.length}
-    → Actualizados en servidor: ${registrosActualizadosEnServer.length}
-    → Nuevos en local: ${registrosNuevosEnLocal.length}
-    → Actualizados en local: ${registrosActualizadosEnLocal.length}
+    ✓ Análisis de ${tableName}:
+      → Nuevos en servidor: ${registrosNuevosEnServer.length}
+      → Actualizados en servidor: ${registrosActualizadosEnServer.length}
+      → Nuevos en local: ${registrosNuevosEnLocal.length}
+      → Actualizados en local: ${registrosActualizadosEnLocal.length}
       `);
   
-      // 5. Funciones de sincronización
-      const sincronizarRegistro = async (registro, targetDB, isInsert, source) => {
+      const sincronizarRegistro = async (registro, targetDB, isInsert, source, transaction) => {
         const replacements = {};
         columns.forEach(column => {
           replacements[column] = registro[column];
         });
-      
+  
         try {
           if (isInsert) {
             const insertColumns = columns.join(', ');
             const insertValues = columns.map(col => `:${col}`).join(', ');
-            
             await targetDB.query(
               `INSERT INTO ${tableName} (${insertColumns})
                VALUES (${insertValues})`,
-              {
-                replacements,
-                type: QueryTypes.INSERT
-              }
+              { replacements, type: QueryTypes.INSERT, transaction }
             );
             console.log(`✓ ${tableName} ID ${registro.id} insertado en ${source}`);
           } else {
@@ -129,15 +128,12 @@ const TABLE_CONFIGS = {
               .filter(col => col !== 'id')
               .map(col => `${col} = :${col}`)
               .join(', ');
-            
+  
             await targetDB.query(
               `UPDATE ${tableName}
                SET ${updateSet}
                WHERE id = :id`,
-              {
-                replacements,
-                type: QueryTypes.UPDATE
-              }
+              { replacements, type: QueryTypes.UPDATE, transaction }
             );
             console.log(`✓ ${tableName} ID ${registro.id} actualizado en ${source}`);
           }
@@ -145,27 +141,27 @@ const TABLE_CONFIGS = {
         } catch (error) {
           errorCount++;
           console.error(`
-      Error en ${tableName} ID ${registro.id}:
-      - Operación: ${isInsert ? 'INSERT' : 'UPDATE'}
-      - Base de datos destino: ${source}
-      - Código de error: ${error.parent?.code || 'N/A'}
-      - Mensaje: ${error.message}
-      - Detalles SQL: ${error.parent?.sqlMessage || 'N/A'}
-      - Valores: ${JSON.stringify(replacements, null, 2)}
+          Error en ${tableName} ID ${registro.id}:
+          - Operación: ${isInsert ? 'INSERT' : 'UPDATE'}
+          - Base de datos destino: ${source}
+          - Código de error: ${error.parent?.code || 'N/A'}
+          - Mensaje: ${error.message}
+          - Detalles SQL: ${error.parent?.sqlMessage || 'N/A'}
+          - Valores: ${JSON.stringify(replacements, null, 2)}
           `);
         }
       };
-      // 6. Proceso de sincronización
+  
       if (direction === 'both' || direction === 'server-to-local') {
         console.log(`\nSincronizando ${tableName} Servidor → Local`);
         await localDB.transaction(async transaction => {
           await localDB.query('SET FOREIGN_KEY_CHECKS = 0', { transaction });
           try {
             for (const registro of registrosNuevosEnServer) {
-              await sincronizarRegistro(registro, localDB, true, 'local');
+              await sincronizarRegistro(registro, localDB, true, 'local', transaction);
             }
             for (const registro of registrosActualizadosEnServer) {
-              await sincronizarRegistro(registro, localDB, false, 'local');
+              await sincronizarRegistro(registro, localDB, false, 'local', transaction);
             }
           } finally {
             await localDB.query('SET FOREIGN_KEY_CHECKS = 1', { transaction });
@@ -179,10 +175,10 @@ const TABLE_CONFIGS = {
           await serverDB.query('SET FOREIGN_KEY_CHECKS = 0', { transaction });
           try {
             for (const registro of registrosNuevosEnLocal) {
-              await sincronizarRegistro(registro, serverDB, true, 'servidor');
+              await sincronizarRegistro(registro, serverDB, true, 'servidor', transaction);
             }
             for (const registro of registrosActualizadosEnLocal) {
-              await sincronizarRegistro(registro, serverDB, false, 'servidor');
+              await sincronizarRegistro(registro, serverDB, false, 'servidor', transaction);
             }
           } finally {
             await serverDB.query('SET FOREIGN_KEY_CHECKS = 1', { transaction });
@@ -190,43 +186,141 @@ const TABLE_CONFIGS = {
         });
       }
   
-      return { processedCount, errorCount };
+      return { processedCount, errorCount, registrosLocal, registrosServer };
     } catch (error) {
       throw new Error(`Error sincronizando ${tableName}: ${error.message}`);
     }
   };
   
-  const sincronizarTodo = async (direction = 'server-to-local') => {
+  const sincronizarTodo = async (direction = 'both') => {
     let serverDB, localDB;
   
     try {
-      // Validar dirección
       if (!['both', 'server-to-local', 'local-to-server'].includes(direction)) {
         throw new Error('Dirección de sincronización inválida');
       }
   
-      // Inicializar conexiones
       serverDB = new Sequelize(DB_CONFIGS.server);
       localDB = new Sequelize(DB_CONFIGS.local);
   
-      // Verificar conexiones
       await Promise.all([
         serverDB.authenticate(),
         localDB.authenticate()
       ]);
       console.log("✓ Conexiones establecidas correctamente");
   
-      // Sincronizar cada tabla configurada
       const resultados = {};
       for (const [tableName, config] of Object.entries(TABLE_CONFIGS)) {
         console.log(`\n=== Iniciando sincronización de ${tableName} ===`);
         try {
-          resultados[tableName] = await sincronizarTabla(
+          const { processedCount, errorCount, registrosLocal, registrosServer } = await sincronizarTabla(
             config,
             localDB,
             serverDB,
             direction
           );
+          resultados[tableName] = { processedCount, errorCount };
+  
+          // SOLO si es ubicaciones, generamos el mapeo dinámico en LOCAL y luego REMOTO
+          if (tableName === 'ubicaciones') {
+            const serverByName = new Map(registrosServer.map(r => [r.nombre, r]));
+            const ID_MAPPING = {};
+  
+            for (const localReg of registrosLocal) {
+              const serverReg = serverByName.get(localReg.nombre);
+              // Si existe en servidor con otro ID, generar el mapeo
+              if (serverReg && serverReg.id !== localReg.id) {
+                ID_MAPPING[localReg.id] = serverReg.id;
+              }
+            }
+  
+            if (Object.keys(ID_MAPPING).length > 0) {
+              console.log("=== Ajustando IDs en ubicaciones (Local) y actualizando bienes (Local) ===");
+  
+              await localDB.transaction(async (transaction) => {
+                await localDB.query('SET FOREIGN_KEY_CHECKS = 0', { transaction });
+                try {
+                  const oldIds = Object.keys(ID_MAPPING).map(id => parseInt(id,10));
+                  let cases = '';
+  
+                  for (const [oldId, newId] of Object.entries(ID_MAPPING)) {
+                    // Insertar ubicación con newId si no existe en local
+                    await localDB.query(`
+                      INSERT IGNORE INTO ubicaciones (id, nombre, updatedAt, createdAt)
+                      SELECT ${newId}, nombre, updatedAt, createdAt
+                      FROM ubicaciones
+                      WHERE id = ${oldId}
+                    `, { transaction });
+  
+                    cases += ` WHEN ${oldId} THEN ${newId} `;
+                  }
+  
+                  if (cases) {
+                    await localDB.query(`
+                      UPDATE bienes
+                      SET ubicacion_id = CASE ubicacion_id
+                        ${cases}
+                      END
+                      WHERE ubicacion_id IN (${oldIds.join(',')})
+                    `, { transaction });
+                  }
+  
+                  // Eliminar las ubicaciones con IDs antiguos en local
+                  await localDB.query(`
+                    DELETE FROM ubicaciones WHERE id IN (${oldIds.join(',')})
+                  `, { transaction });
+  
+                } finally {
+                  await localDB.query('SET FOREIGN_KEY_CHECKS = 1', { transaction });
+                }
+              });
+  
+              console.log("✓ Ajuste de IDs y actualización en 'bienes' completados (Local).");
+  
+              // Ahora replicamos el mismo ajuste en la base remota
+              console.log("=== Ajustando IDs en ubicaciones (Remoto) y actualizando bienes (Remoto) ===");
+  
+              await serverDB.transaction(async (transaction) => {
+                await serverDB.query('SET FOREIGN_KEY_CHECKS = 0', { transaction });
+                try {
+                  const oldIds = Object.keys(ID_MAPPING).map(id => parseInt(id,10));
+                  let cases = '';
+  
+                  for (const [oldId, newId] of Object.entries(ID_MAPPING)) {
+                    // Insertar ubicación con newId si no existe en remoto
+                    await serverDB.query(`
+                      INSERT IGNORE INTO ubicaciones (id, nombre, updatedAt, createdAt)
+                      SELECT ${newId}, nombre, updatedAt, createdAt
+                      FROM ubicaciones
+                      WHERE id = ${oldId}
+                    `, { transaction });
+  
+                    cases += ` WHEN ${oldId} THEN ${newId} `;
+                  }
+  
+                  if (cases) {
+                    await serverDB.query(`
+                      UPDATE bienes
+                      SET ubicacion_id = CASE ubicacion_id
+                        ${cases}
+                      END
+                      WHERE ubicacion_id IN (${oldIds.join(',')})
+                    `, { transaction });
+                  }
+  
+                  // Eliminar las ubicaciones con IDs antiguos en remoto
+                  await serverDB.query(`
+                    DELETE FROM ubicaciones WHERE id IN (${oldIds.join(',')})
+                  `, { transaction });
+  
+                } finally {
+                  await serverDB.query('SET FOREIGN_KEY_CHECKS = 1', { transaction });
+                }
+              });
+  
+              console.log("✓ Ajuste de IDs y actualización en 'bienes' completados (Remoto).");
+            }
+          }
         } catch (error) {
           console.error(`✗ Error en ${tableName}:`, error.message);
           resultados[tableName] = { processedCount: 0, errorCount: 1 };
@@ -247,11 +341,16 @@ const TABLE_CONFIGS = {
       console.error('✗ Error general:', error.message);
       throw error;
     } finally {
-      // Cerrar conexiones
       if (localDB) await localDB.close();
       if (serverDB) await serverDB.close();
     }
   };
+  
+  module.exports = { sincronizarTodo };
+  
+  
+  
+  
   
   // Exportar funciones
   module.exports = {
