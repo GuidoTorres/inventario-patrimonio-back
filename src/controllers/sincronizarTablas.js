@@ -122,7 +122,6 @@ const TABLE_CONFIGS = {
                VALUES (${insertValues})`,
               { replacements, type: QueryTypes.INSERT, transaction }
             );
-            console.log(`✓ ${tableName} ID ${registro.id} insertado en ${source}`);
           } else {
             const updateSet = columns
               .filter(col => col !== 'id')
@@ -135,7 +134,6 @@ const TABLE_CONFIGS = {
                WHERE id = :id`,
               { replacements, type: QueryTypes.UPDATE, transaction }
             );
-            console.log(`✓ ${tableName} ID ${registro.id} actualizado en ${source}`);
           }
           processedCount++;
         } catch (error) {

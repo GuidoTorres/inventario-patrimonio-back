@@ -17,7 +17,6 @@ const dbConfigs = {
     password: "root",
     host: "10.30.1.43",
     dialect: "mysql",
-    logging: true,
     pool: {
       max: 5,
       min: 0,
@@ -31,7 +30,6 @@ const dbConfigs = {
     password: "root",
     host: "localhost",
     dialect: "mysql",
-    logging: false,
     pool: {
       max: 5,
       min: 0,
